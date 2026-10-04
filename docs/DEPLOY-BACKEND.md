@@ -44,16 +44,30 @@ git push -u origin main
 
 | Campo | Valor | Por qué |
 |---|---|---|
-| `build.command` | `npm ci` | Instalación reproducible desde el lockfile |
+| `build.builder` | `NIXPACKS` | Railway detecta el proyecto Node por el `package.json` |
 | `start.command` | `node server.js` | Arranque directo, sin wrapper |
 | `healthcheckPath` | `/api/health` | Railway enruta tráfico solo cuando responde |
 | `numReplicas` | `1` | SQLite no admite dos procesos sobre el mismo volumen |
-| `restartPolicy` | `ON_FAILURE`, 3 intentos | Reinicio ante fallo, no ante salida limpia |
+| `restartPolicy` | `ON_FAILURE`, 5 intentos | Reinicio ante fallo, no ante salida limpia |
 | `drainingSeconds` | `10` | Margen para el cierre ordenado |
 | `requiredMountPath` | `/data` | **Falla el deploy si falta el volumen**, en vez de perder la BD |
 
-**Paso 3 — Fijar Node 24.** En *Variables* del servicio: `NODE_VERSION=24`.
-Obligatorio: el proyecto usa `node:sqlite`, que necesita Node ≥ 23.4.
+> **No añadas `build.buildCommand: "npm ci"`.** Nixpacks monta `node_modules/.cache`
+> como volumen de caché durante la fase de build, y `npm ci` borra `node_modules`
+> entero antes de instalar: al llegar a ese punto de montaje falla con
+> `EBUSY: resource busy or locked, rmdir '/app/node_modules/.cache'`.
+> Deja que Nixpacks haga el install en su fase propia, que no tiene ese montaje.
+> El proyecto no tiene script `build`, así que la fase de build queda vacía.
+
+> **Aviso inocuo:** si el log muestra `npm warn config production Use --omit=dev
+> instead`, se puede ignorar. El proyecto no tiene `devDependencies`.
+
+**Paso 3 — Versión de Node.** `.nvmrc` fija la **23**, que es la mayor que Nixpacks
+reconoce de forma explícita y cumple el requisito de `node:sqlite` (disponible sin
+flag experimental desde Node 23.4). `package.json` declara `>=23.4.0` como mínimo
+real; el rango no sirve para fijar versión en Nixpacks, de ahí el `.nvmrc`.
+Comprueba en el log del build que la línea de Node indica 23 o superior: si
+apareciera 18 o 20, `node:sqlite` no existiría y el arranque fallaría.
 
 **Paso 4 — Crear el volumen, ANTES del primer deploy.** En el servicio →
 *Volumes* → *Add Volume*, con mount path `/data`. Crea primero el volumen y luego
@@ -65,7 +79,6 @@ capa efímera y se pierde al reiniciar.
 | Variable | Valor | Notas |
 |---|---|---|
 | `DATA_DIR` | `/data` | Raíz de la BD, el secreto JWT y las claves VAPID |
-| `NODE_VERSION` | `24` | Railway la usa para elegir la imagen |
 | `PORT` | *no la fijes* | Railway la inyecta; el servidor ya lee `process.env.PORT` y escucha en `0.0.0.0` |
 
 **Paso 6 — Seed inicial (una sola vez).** `db/seed.js` es **destructivo**: borra 23
