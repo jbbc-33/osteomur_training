@@ -62,12 +62,33 @@ git push -u origin main
 > **Aviso inocuo:** si el log muestra `npm warn config production Use --omit=dev
 > instead`, se puede ignorar. El proyecto no tiene `devDependencies`.
 
-**Paso 3 — Versión de Node.** `.nvmrc` fija la **23**, que es la mayor que Nixpacks
-reconoce de forma explícita y cumple el requisito de `node:sqlite` (disponible sin
-flag experimental desde Node 23.4). `package.json` declara `>=23.4.0` como mínimo
-real; el rango no sirve para fijar versión en Nixpacks, de ahí el `.nvmrc`.
-Comprueba en el log del build que la línea de Node indica 23 o superior: si
-apareciera 18 o 20, `node:sqlite` no existiría y el arranque fallaría.
+**Paso 3 — Versión de Node: obligatoria, y fijada por partida doble.**
+
+`node:sqlite` requiere Node ≥ 23.4 (desde ahí ya no va tras *flag*
+experimental). Nixpacks solo reconoce las majors `16`, `18`, `20`, `22`, `23`, y
+su default es **18**, que además ya está retirado de nixpkgs. Si la resolución
+falla, el build muere con:
+
+```
+error: Node.js 18.x has reached End-Of-Life and has been removed
+```
+
+Para evitarlo la versión se fija por partida doble:
+
+- `package.json` → `engines.node: "23"`. Debe ser **una major, no un rango**: con
+  `">=23.4.0"` Nixpacks no lo interpreta y cae al default 18.
+- `.nvmrc` → `23`, para `nvm use` en local y para otros hostings.
+
+Comprueba en el log del build que la línea de Node indica 23 o superior. Si
+sigue saliendo 18, añade en las *Variables* del servicio:
+
+| Variable | Valor |
+|---|---|
+| `NIXPACKS_NODE_VERSION` | `23` |
+
+(Es la variable que Nixpacks documenta con máxima prioridad. Si tienes
+`NODE_VERSION=24` de un intento anterior, **bórrala**: puede interferir con la
+resolución.)
 
 **Paso 4 — Crear el volumen, ANTES del primer deploy.** En el servicio →
 *Volumes* → *Add Volume*, con mount path `/data`. Crea primero el volumen y luego
