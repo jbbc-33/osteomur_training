@@ -52,9 +52,16 @@ const API = (() => {
     let data = null;
     try { data = await res.json(); } catch { /* vacío */ }
     if (res.status === 401) {
-      clearAuth();
-      location.href = '/index.html';
-      throw new Error('Sesión caducada');
+      // Un 401 sin token previo es login o registro fallidos: el mensaje real
+      // del servidor ("Credenciales incorrectas", "correo ya registrado") es el
+      // que interesa. "Sesión caducada" solo tiene sentido si había sesión, y en
+      // ese caso sí hay que limpiar y volver al login.
+      if (token) {
+        clearAuth();
+        location.href = '/index.html';
+        throw new Error('Sesión caducada');
+      }
+      throw new Error((data && data.error) || 'No autorizado (' + res.status + ')');
     }
     if (!res.ok) throw new Error((data && data.error) || 'Error en la petición (' + res.status + ')');
     return data;
