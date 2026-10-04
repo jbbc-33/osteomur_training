@@ -17,6 +17,14 @@ mobile/web/
 .env.*
 !.env.example
 
+# Clave de firma de la app Android. Es el secreto mas critico del proyecto:
+# quien tenga el control de esta clave controla la app en Play para siempre.
+# Si se pierde, no se puede publicar ninguna actualizacion. Copia de seguridad
+# en un sitio seguro, nunca en git.
+*.jks
+*.keystore
+keystore.properties
+
 # Scripts y volcados auxiliares de depuracion. No forman parte de la app:
 # los usa el scrapeo de public/js para localizar funciones y volcar HTML.
 # Se pueden borrar sin riesgo.

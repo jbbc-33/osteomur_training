@@ -9,7 +9,11 @@
     "seed": "node db/seed.js",
     "reset": "node db/reset.js",
     "test": "node test-api.js",
-    "test:informe": "node tests/informe-perfil.test.js"
+    "test:informe": "node tests/informe-perfil.test.js",
+    "android:keystore": "node scripts/gen-release-keystore.mjs",
+    "android:bundle": "node scripts/build-android-release.mjs",
+    "play:assets": "powershell -ExecutionPolicy Bypass -File scripts/gen-play-assets.ps1",
+    "play:screenshots": "node scripts/capture-play-screenshots.mjs"
   },
   "engines": {
     "node": "24"

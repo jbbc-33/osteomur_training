@@ -5,7 +5,7 @@
   "backgroundColor": "#063DA8",
   "android": {
     "backgroundColor": "#063DA8",
-    "allowMixedContent": true
+    "allowMixedContent": false
   },
   "ios": {
     "backgroundColor": "#063DA8"
