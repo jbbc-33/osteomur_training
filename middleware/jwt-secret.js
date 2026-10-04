@@ -1,15 +1,16 @@
 'use strict';
 
 const fs = require('fs');
-const path = require('path');
+const crypto = require('crypto');
+const { JWT_SECRET_FILE, ensureDataDir } = require('../config/paths');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const KEY_FILE = path.join(DATA_DIR, 'jwt-secret');
-
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-if (!fs.existsSync(KEY_FILE)) {
-  fs.writeFileSync(KEY_FILE, require('crypto').randomBytes(32).toString('hex'));
+// El secreto se autogenera la primera vez. Debe vivir en el disco persistente:
+// si se regenera en cada arranque, todos los tokens emitidos quedan invalidos y
+// habria que volver a iniciar sesion.
+ensureDataDir();
+if (!fs.existsSync(JWT_SECRET_FILE)) {
+  fs.writeFileSync(JWT_SECRET_FILE, crypto.randomBytes(32).toString('hex'));
 }
-const JWT_SECRET = fs.readFileSync(KEY_FILE, 'utf8').trim();
+const JWT_SECRET = fs.readFileSync(JWT_SECRET_FILE, 'utf8').trim();
 
 module.exports = { JWT_SECRET };

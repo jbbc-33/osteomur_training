@@ -1,15 +1,16 @@
 'use strict';
 
 const fs = require('fs');
-const path = require('path');
 const webpush = require('web-push');
 const { db } = require('../db/db');
 const { slotStartDateTime } = require('../db/db');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const VAPID_FILE = path.join(DATA_DIR, 'vapid.json');
+const { VAPID_FILE, ensureDataDir } = require('../config/paths');
 const CONTACT = 'mailto:admin@osteomur.es';
 
+// Las claves VAPID tambien deben persistir: si se regeneran, las suscripciones
+// push que ya tienen los dispositivos dejan de valer.
+ensureDataDir();
 let vapidKeys = null;
 try {
   vapidKeys = JSON.parse(fs.readFileSync(VAPID_FILE, 'utf8'));

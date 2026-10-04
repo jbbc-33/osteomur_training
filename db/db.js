@@ -1,13 +1,9 @@
 'use strict';
 
-const path = require('path');
-const fs = require('fs');
 const { DatabaseSync } = require('node:sqlite');
+const { DB_PATH, ensureDataDir } = require('../config/paths');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const DB_PATH = path.join(DATA_DIR, 'training.db');
-
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+ensureDataDir();
 
 const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL;');

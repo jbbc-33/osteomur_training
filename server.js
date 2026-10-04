@@ -15,6 +15,8 @@ const { db } = require('./db/db');
 
 const PORT = Number(process.env.PORT || 3000);
 
+let server = null;
+
 const app = express();
 app.use(express.json({ limit: '3mb' }));
 // Sin cache para los assets del frontend: la web se está probando/iterando y un
@@ -90,7 +92,7 @@ startScheduler();
 try { sweepExpiredWallets(); } catch (e) { console.warn('Sweep de caducidades:', e.message); }
 
 if (require.main === module) {
-  app.listen(PORT, '0.0.0.0', () => {
+  server = app.listen(PORT, '0.0.0.0', () => {
   const nets = os.networkInterfaces();
   const lan = [];
   for (const name of Object.keys(nets)) {
@@ -107,6 +109,25 @@ if (require.main === module) {
   console.log('  Vista Cliente:    abrir la URL y hacer login con cuenta de cliente');
   console.log('  Panel Entrenador: login con cuenta de entrenador');
   console.log('  Cuentas demo (clave: demo1234) en README.md');
+  });
+}
+
+// Cierre ordenado: Railway avisa con SIGTERM antes de reiniciar el contenedor.
+// Sin esto el proceso muere a mitad de una escritura y SQLite puede dejar el WAL
+// sin consolidar (con `busy_timeout` esperando un lock que nunca se libera).
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  process.on(signal, () => {
+    console.log(`${signal} recibido, cerrando...`);
+    const cerrar = () => {
+      try { db.close(); } catch { /* ya cerrada */ }
+      process.exit(0);
+    };
+    // `server` es null si el módulo se importó sin ejecutarlo (p.ej. en tests).
+    if (server) server.close(cerrar);
+    else cerrar();
+    // Si alguna conexion (p.ej. un stream SSE abierto) no cierra, no esperar
+    // indefinidamente: Railway da pocos segundos antes del SIGKILL.
+    setTimeout(cerrar, 5000).unref();
   });
 }
 

@@ -1,11 +1,10 @@
 'use strict';
 
 const fs = require('fs');
-const path = require('path');
 const bcrypt = require('bcryptjs');
+const { DB_PATH, ensureDataDir } = require('../config/paths');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const DB_PATH = path.join(DATA_DIR, 'training.db');
+ensureDataDir();
 
 console.log('Resetear base de datos...');
 for (const f of [DB_PATH, DB_PATH + '-wal', DB_PATH + '-shm']) {
