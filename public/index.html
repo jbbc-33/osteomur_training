@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#063DA8">
+  <title>OSTEOMUR Training · Entrena</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="auth-page">
+    <div class="auth-card">
+      <div class="auth-logo">
+        <img class="logo-mark" src="/logo.png" alt="OSTEOMUR Training">
+        <h1>OSTEOMUR Training</h1>
+        <p>Entrenamiento personal · Valoración, reservas y progreso</p>
+      </div>
+
+      <div class="auth-tabs">
+        <button id="tab-login" class="active" type="button">Iniciar sesión</button>
+        <button id="tab-register" type="button">Crear cuenta</button>
+      </div>
+
+      <div class="error-box" id="error-box"></div>
+
+      <!-- Login -->
+      <form id="form-login" autocomplete="on">
+        <div class="field">
+          <label for="login-email">Email</label>
+          <input id="login-email" type="email" required placeholder="tu@email.com">
+        </div>
+        <div class="field">
+          <label for="login-password">Contraseña</label>
+          <input id="login-password" type="password" required placeholder="••••••••">
+        </div>
+        <button class="btn btn-primary btn-block btn-lg" type="submit">Entrar</button>
+      </form>
+
+      <!-- Registro -->
+      <form id="form-register" style="display:none;" autocomplete="on">
+        <div class="field">
+          <label for="reg-name">Nombre completo</label>
+          <input id="reg-name" required placeholder="Nombre y apellidos">
+        </div>
+        <div class="field">
+          <label for="reg-email">Email</label>
+          <input id="reg-email" type="email" required placeholder="tu@email.com">
+        </div>
+        <div class="form-grid-2">
+          <div class="field">
+            <label for="reg-password">Contraseña (mín. 6)</label>
+            <input id="reg-password" type="password" required minlength="6" placeholder="••••••••">
+          </div>
+          <div class="field">
+            <label for="reg-phone">Teléfono</label>
+            <input id="reg-phone" type="tel" placeholder="+34 ...">
+          </div>
+        </div>
+        <div class="form-grid-3">
+          <div class="field">
+            <label for="reg-age">Edad</label>
+            <input id="reg-age" type="number" min="14" max="100" placeholder="30">
+          </div>
+          <div class="field">
+            <label for="reg-height">Altura (cm)</label>
+            <input id="reg-height" type="number" min="120" max="230" placeholder="175">
+          </div>
+          <div class="field">
+            <label for="reg-sport">Deporte</label>
+            <input id="reg-sport" placeholder="Fútbol">
+          </div>
+        </div>
+        <div class="field">
+          <label for="reg-injuries">Lesiones activas</label>
+          <textarea id="reg-injuries" placeholder="Ej. esguince de tobillo derecho (opcional)"></textarea>
+        </div>
+        <button class="btn btn-primary btn-block btn-lg" type="submit">Crear mi cuenta</button>
+        <p class="field-hint" style="text-align:center;margin-top:8px;">
+          Tu cuenta es de cliente. Pide a tu entrenador que active tu bono de créditos.
+        </p>
+      </form>
+
+      <div class="demo-box">
+        <b>Cuentas de demostración</b> (contraseña <b>demo1234</b>):
+        <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">
+          <button type="button" data-email="entrenador@osteomur.es">Entrenador</button>
+          <button type="button" data-email="carlos@demo.com">Carlos</button>
+          <button type="button" data-email="marta@demo.com">Marta</button>
+          <button type="button" data-email="luis@demo.com">Luis</button>
+          <button type="button" data-email="ana@demo.com">Ana</button>
+          <button type="button" data-email="pedro@demo.com">Pedro</button>
+          <button type="button" data-email="laura@demo.com">Laura</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/app-config.js"></script>
+  <script src="/js/api.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    const box = $('error-box');
+    function showErr(msg) { box.textContent = msg; box.classList.add('show'); }
+    function hideErr() { box.classList.remove('show'); }
+
+    $('tab-login').addEventListener('click', () => switchTab('login'));
+    $('tab-register').addEventListener('click', () => switchTab('register'));
+    function switchTab(t) {
+      hideErr();
+      $('tab-login').classList.toggle('active', t === 'login');
+      $('tab-register').classList.toggle('active', t === 'register');
+      $('form-login').style.display = t === 'login' ? '' : 'none';
+      $('form-register').style.display = t === 'register' ? '' : 'none';
+    }
+
+    $('form-login').addEventListener('submit', async (e) => {
+      e.preventDefault(); hideErr();
+      try {
+        const data = await API.post('/auth/login', {
+          email: $('login-email').value.trim(),
+          password: $('login-password').value,
+        });
+        finish(data);
+      } catch (err) { showErr(err.message); }
+    });
+
+    $('form-register').addEventListener('submit', async (e) => {
+      e.preventDefault(); hideErr();
+      try {
+        const data = await API.post('/auth/register', {
+          email: $('reg-email').value.trim(),
+          password: $('reg-password').value,
+          full_name: $('reg-name').value.trim(),
+          phone: $('reg-phone').value.trim(),
+          age: $('reg-age').value ? Number($('reg-age').value) : undefined,
+          height_cm: $('reg-height').value ? Number($('reg-height').value) : undefined,
+          sport: $('reg-sport').value.trim(),
+          active_injuries: $('reg-injuries').value.trim(),
+        });
+        finish(data);
+      } catch (err) { showErr(err.message); }
+    });
+
+    function finish(data) {
+      API.setAuth(data.token, data.user);
+      location.href = data.user.role === 'trainer' ? '/trainer.html' : '/client.html';
+    }
+
+    // Autocompletar credenciales de demo
+    document.querySelectorAll('.demo-box button').forEach((b) => {
+      b.addEventListener('click', () => {
+        $('login-email').value = b.dataset.email;
+        $('login-password').value = 'demo1234';
+        switchTab('login');
+        $('form-login').requestSubmit();
+      });
+    });
+  </script>
+  <script src="/js/native.js"></script>
+</body>
+</html>

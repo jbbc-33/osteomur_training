@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#063DA8">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>OSTEOMUR Training · Panel Entrenador</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body class="app-body">
+  <div class="trainer-shell">
+    <header class="app-header">
+      <div class="app-brand">
+        <img class="logo-mark" src="/logo.png" alt="OSTEOMUR Training">
+        <div class="brand-name">OSTEOMUR Training<small>Panel del entrenador</small></div>
+      </div>
+      <div class="header-actions">
+        <span class="badge badge-info" id="today-label">—</span>
+        <button class="icon-btn" id="btn-trainer-logout" title="Cerrar sesión">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- ======= SESIONES ======= -->
+    <section class="view active" id="tview-sessions">
+      <h2 class="view-title">Sesiones</h2>
+      <div class="sub-tabs" id="sessions-tabs">
+        <button class="active" data-tab="attendance">Asistencia del día</button>
+        <button data-tab="plan">Plantilla y calendario</button>
+      </div>
+      <div id="sessions-area"></div>
+    </section>
+
+    <!-- ======= CLIENTES ======= -->
+    <section class="view" id="tview-clients">
+      <h2 class="view-title">Clientes</h2>
+      <div class="search-box">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
+        <input id="clients-search" placeholder="Buscar por nombre o email...">
+      </div>
+      <div id="clients-area"></div>
+    </section>
+
+    <!-- ======= EJERCICIOS ======= -->
+    <section class="view" id="tview-exercises">
+      <h2 class="view-title">Ejercicios</h2>
+      <p class="muted small">Biblioteca de ejercicios con descripción, claves de técnica y vídeo. Los clientes la ven en su apartado de Ejercicios.</p>
+      <div class="card">
+        <h3>Añadir ejercicio</h3>
+        <div class="form-grid-2">
+          <div class="field"><label>Nombre</label><input id="ex-new-name"></div>
+          <div class="field"><label>Categoría</label><input id="ex-new-cat" placeholder="Fuerza"></div>
+        </div>
+        <div class="field"><label>Enlace del vídeo (YouTube)</label><input id="ex-new-video" placeholder="https://www.youtube.com/watch?v=..."></div>
+        <div class="field"><label>Descripción</label><textarea id="ex-new-desc"></textarea></div>
+        <div class="field"><label>Claves de técnica</label><textarea id="ex-new-tips"></textarea></div>
+        <button class="btn btn-primary" id="btn-add-ex">Guardar ejercicio</button>
+      </div>
+      <div id="library-list"></div>
+    </section>
+
+    <!-- ======= BONOS Y CRÉDITOS ======= -->
+    <section class="view" id="tview-bonos">
+      <h2 class="view-title">Bonos y créditos</h2>
+      <div id="bonos-area"></div>
+    </section>
+
+    <!-- ======= FACTURACIÓN ======= -->
+    <section class="view" id="tview-facturacion">
+      <h2 class="view-title">Facturación</h2>
+      <div id="facturacion-area"></div>
+    </section>
+  </div>
+
+  <!-- Navegación -->
+  <nav class="trainer-nav" id="trainer-nav">
+    <button class="nav-item active" data-tview="sessions">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M12 14v4m-2-2h4"/></svg>
+      <span>Sesiones</span>
+    </button>
+    <button class="nav-item" data-tview="clients">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      <span>Clientes</span>
+    </button>
+    <button class="nav-item" data-tview="exercises">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 21V8a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v13"/><path d="M6 21h12M10 6V3m4 3V3"/></svg>
+      <span>Ejercicios</span>
+    </button>
+    <button class="nav-item" data-tview="facturacion">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M12 5v14"/></svg>
+      <span>Facturación</span>
+    </button>
+    <button class="nav-item" data-tview="bonos">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M8 14.5c1 1.5 2.5 2 4 2s3-.7 3-2-1.2-1.7-3-2.3-3-.8-3-2.2 1.3-2 3-2 3 .5 4 1.5"/><path d="M12 7v10"/></svg>
+      <span>Bonos</span>
+    </button>
+  </nav>
+
+  <script src="/js/app-config.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/app-trainer.js"></script>
+  <script src="/js/native.js"></script>
+</body>
+</html>

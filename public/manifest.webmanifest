@@ -1,0 +1,13 @@
+{
+  "name": "OSTEOMUR Training",
+  "short_name": "OSTEOMUR Training",
+  "start_url": "/client.html",
+  "display": "standalone",
+  "background_color": "#063DA8",
+  "theme_color": "#063DA8",
+  "description": "Reserva clases, controla tu progreso y repasa la técnica de tus ejercicios en OSTEOMUR.",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

@@ -1,0 +1,38 @@
+# Dependencias (raiz y mobile/)
+node_modules/
+
+# Datos locales: base de datos y secretos. Nada de esto se versiona porque se
+# regenera solo al arrancar o con `npm run seed`:
+#   data/jwt-secret   -> middleware/jwt-secret.js lo genera si no existe
+#   data/vapid.json   -> services/notifications.js lo genera si no existe
+#   data/training.db  -> la crea db/db.js y la puebla `npm run seed`
+data/
+
+# Web movil: es una COPIA de public/ que genera scripts/build-mobile-web.mjs
+# ("No editar, se sobrescribe"). La fuente de verdad es public/.
+mobile/web/
+
+# Variables de entorno
+.env
+.env.*
+!.env.example
+
+# Scripts y volcados auxiliares de depuracion. No forman parte de la app:
+# los usa el scrapeo de public/js para localizar funciones y volcar HTML.
+# Se pueden borrar sin riesgo.
+_*.py
+_*.txt
+_*.js
+.patrones.txt
+
+# Logs
+*.log
+npm-debug.log*
+
+# Sistema operativo y editores
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp

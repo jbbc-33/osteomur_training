@@ -1,0 +1,49 @@
+{
+  "equilibrio": { "d": { "elapsed": 31.2, "errores": 1 }, "i": { "elapsed": 12.0, "errores": 0 } },
+  "sentadilla": { "profundidad": "Completa", "control_tronco": "Si", "control_rodilla": "Si", "simetria": "Si", "sintomas": 0, "observaciones": "sin dolor" },
+  "mcgill_flexores": { "elapsed": 38.4 },
+  "mcgill_extensores": { "elapsed": 52.1 },
+  "plancha_d": { "elapsed": 44.0 },
+  "plancha_i": { "elapsed": 41.5 },
+  "cmj": { "attempts": [{ "cm": 32.4, "valid": true }, { "cm": 31.8, "valid": true }] },
+  "cmj_unilateral": { "side": "d", "d": { "attempts": [{ "cm": 21.0, "valid": true }] }, "i": { "attempts": [{ "cm": 19.5, "valid": true }] } },
+  "ebbeling": { "speed_mph": 3.4, "speed_kmh": 5.5, "stage_hr_min3": 148, "steady_state_hr": 146, "vo2max_estimated": 27.8, "warmup_hr_end": 120, "rpe_end": 13, "operator": "Local", "hr_device": "Polar H10", "placement": "antebrazo", "notes": "sin incidencias" },
+  "adulto_mayor": {
+    "tug": { "elapsed": 14.2 },
+    "prension": { "d": [{ "v": 24 }], "i": [{ "v": 21 }] },
+    "heel_rise": { "elapsed_d": 12.4, "elapsed_i": 11.8, "conteo_d": 14, "conteo_i": 13, "ritmo": "Ritmo 1/s", "protocolo": "OSTEOMUR", "sintomas": 2 },
+    "bruce": {
+      "warmup_hr_end": 128, "total_time_s": 660, "last_completed_stage": 4, "stop_reason": "Fatiga",
+      "etapas": [
+        { "n": 1, "velocidad_kmh": 2.7, "velocidad_mph": 1.7, "pendiente_pct": 0, "completada": true, "elapsed": 180, "fc": 138, "rpe": 11 },
+        { "n": 2, "velocidad_kmh": 2.7, "velocidad_mph": 1.7, "pendiente_pct": 5, "completada": true, "elapsed": 180, "fc": 146, "rpe": 12 },
+        { "n": 3, "velocidad_kmh": 2.7, "velocidad_mph": 1.7, "pendiente_pct": 10, "completada": true, "elapsed": 180, "fc": 155, "rpe": 12 },
+        { "n": 4, "velocidad_kmh": 4.0, "velocidad_mph": 2.5, "pendiente_pct": 12, "completada": true, "elapsed": 180, "fc": 163, "rpe": 13 },
+        { "n": 5, "velocidad_kmh": 5.5, "velocidad_mph": 3.4, "pendiente_pct": 14, "completada": false, "elapsed": 0, "fc": "", "rpe": "" }
+      ]
+    }
+  },
+  "rendimiento": {
+    "cmj": { "intentos": [{ "cm": 45.2, "valido": true }] },
+    "cmj_unilateral": { "d": [{ "cm": 33.1, "valido": true }], "i": [{ "cm": 31.8, "valido": true }] },
+    "drop_jump": { "altura_cajon": 60, "salto_d": 34, "contacto_d": 150, "salto_i": 31, "contacto_i": 145 },
+    "sprint": { "distancia": 60, "tiempo": 7.4, "protocolo": "10 m" },
+    "cod": { "protocolo": "COD", "d": { "t": 6.2, "valido": true }, "i": { "t": 6.5, "valido": true } },
+    "hhd": { "movimiento": "Izquierda", "unidad": "N", "d": [{ "v": 42 }], "i": [{ "v": 39 }] },
+    "fuerza_velocidad": { "ejercicio": "Sentadilla", "rows": [{ "carga": 40, "velocidad": 0.8 }] },
+    "gxt": {
+      "warmup": { "elapsed": 300, "fc_end": 120, "rpe": 3 },
+      "etapas": [
+        { "n": 1, "velocidad_kmh": 8, "velocidad_mph": 5, "pendiente_pct": 1, "completada": true, "elapsed": 60, "fc": 150, "rpe": 12 },
+        { "n": 2, "velocidad_kmh": 9, "velocidad_mph": 5.6, "pendiente_pct": 1, "completada": true, "elapsed": 60, "fc": 165, "rpe": 14 }
+      ],
+      "recovery": { "fc_1m": 158, "fc_2m": 149 },
+      "vpeak_base_kmh": 9, "vpeak_interpolada_kmh": 9.5, "stop_reason": "Fatiga"
+    }
+  },
+  "readaptacion": {
+    "rodilla": { "ckcuest": { "elapsed": 22.5, "toques": 24, "protocolo": "CKCUEST" }, "funcional": { "protocolo": "A", "campo1": "x", "campo2": "", "campo3": "", "campo4": "" } },
+    "tobillo": { "rot_interna_externa": { "unidad": "grados", "valord": 12, "valori": 10 } },
+    "hombro": { "protocolo": "OSTEOMUR" }
+  }
+}

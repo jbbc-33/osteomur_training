@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#063DA8">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>OSTEOMUR Training · Mi Entreno</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body class="app-body">
+  <div class="app-shell">
+    <header class="app-header">
+      <div class="app-brand">
+        <img class="logo-mark" src="/logo.png" alt="OSTEOMUR Training">
+        <div class="brand-name">OSTEOMUR Training<small>Entrenamiento personal</small></div>
+      </div>
+      <div class="header-actions">
+        <div class="credits-chip" id="credits-chip" title="Tus bonos y créditos">
+          <span class="cc-num" id="cc-num">0</span>
+          <span class="cc-lbl">créditos</span>
+        </div>
+        <button class="icon-btn" id="btn-notif" title="Notificaciones">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+          <span class="dot" id="notif-dot" style="display:none;"></span>
+        </button>
+        <button class="icon-btn" id="btn-avatar" title="Mi perfil"></button>
+      </div>
+    </header>
+
+    <!-- ======= SESIONES DISPONIBLES ======= -->
+    <section class="view active" id="view-sessions">
+      <h2 class="view-title">Sesiones disponibles</h2>
+      <div class="next-class" id="next-class-box">
+        <div class="tag">Próxima clase reservada</div>
+        <div class="big" id="next-class-when">Sin reservas</div>
+        <div class="sub" id="next-class-where">Cada sesión consume 1 crédito · OSTEOMUR</div>
+      </div>
+      <p class="muted small" style="margin-bottom:14px;">Solo se muestran la semana actual y la siguiente. Cada sesión cuesta <b>1 crédito</b> de tu bono.</p>
+      <div id="sessions-list"></div>
+    </section>
+
+    <!-- ======= EJERCICIOS ======= -->
+    <section class="view" id="view-train">
+      <h2 class="view-title">Ejercicios</h2>
+      <p class="muted small">Repasa la técnica de los ejercicios de tu entrenamiento.</p>
+      <div class="ex-filter" id="ex-filter"></div>
+      <div id="ex-list"></div>
+    </section>
+
+    <!-- ======= WELLNESS ======= -->
+    <section class="view" id="view-wellness">
+      <h2 class="view-title">Wellness</h2>
+      <div id="wellness-content"></div>
+    </section>
+
+    <!-- ======= PROGRESO ======= -->
+    <section class="view" id="view-progress">
+      <h2 class="view-title">Mi progreso</h2>
+      <details class="progress-sec" id="progress-sec-plan" open>
+        <summary>Tu plan de entrenamiento</summary>
+        <div id="training-plan-box"></div>
+      </details>
+      <details class="progress-sec" id="progress-sec-general" open>
+        <summary>Estadísticas Generales</summary>
+        <div class="chart-box"><h4>Peso corporal (kg)</h4><canvas id="chart-weight"></canvas></div>
+        <div class="chart-box"><h4>% Grasa corporal</h4><canvas id="chart-fat"></canvas></div>
+        <div class="chart-box"><h4>Masa muscular (kg)</h4><canvas id="chart-muscle"></canvas></div>
+      </details>
+      <details class="progress-sec" id="progress-sec-exercises" open>
+        <summary>Estadísticas en Ejercicios</summary>
+        <div id="exercise-stats"></div>
+      </details>
+      <details class="progress-sec" id="progress-sec-reports" open>
+        <summary>Informes de valoración</summary>
+        <div id="report-list"></div>
+      </details>
+    </section>
+
+    <!-- ======= PERFIL (modal) ======= -->
+    <div id="profile-modal" style="display:none;"></div>
+  </div>
+
+  <!-- Navegación inferior / lateral -->
+  <nav class="nav-bar" id="nav-bar">
+    <button class="nav-item active" data-goto="sessions">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M12 14v4m-2-2h4"/></svg>
+      <span>Sesiones</span>
+    </button>
+    <button class="nav-item" data-goto="train">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 21V8a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v13"/><path d="M6 21h12M10 6V3m4 3V3"/></svg>
+      <span>Ejercicios</span>
+    </button>
+    <button class="nav-item" data-goto="wellness">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-4.5-9.5-9A5.5 5.5 0 0 1 12 6.5 5.5 5.5 0 0 1 21.5 12C19 16.5 12 21 12 21z"/><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/></svg>
+      <span>Wellness</span>
+    </button>
+    <button class="nav-item" data-goto="progress">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-5 3 3 5-7"/></svg>
+      <span>Progreso</span>
+    </button>
+  </nav>
+
+  <!-- Panel de notificaciones -->
+  <div id="notif-panel" style="display:none;"></div>
+
+  <script src="/js/app-config.js"></script>
+  <script src="/js/api.js"></script>
+  <script src="/js/app-client.js"></script>
+  <script src="/js/native.js"></script>
+</body>
+</html>

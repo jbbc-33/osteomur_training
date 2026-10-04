@@ -1,0 +1,23 @@
+{
+  "name": "osteomur-training",
+  "version": "1.0.0",
+  "description": "App de entrenamiento personal - Vista Cliente y Panel Entrenador (OSTEOMUR)",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node db/seed.js",
+    "reset": "node db/reset.js",
+    "test": "node test-api.js",
+    "test:informe": "node tests/informe-perfil.test.js"
+  },
+  "engines": {
+    "node": ">=23.4.0"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "web-push": "^3.6.7"
+  }
+}

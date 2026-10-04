@@ -1,0 +1,26 @@
+{
+  "name": "osteomur-mobile",
+  "version": "1.0.0",
+  "description": "App nativa OSTEOMUR (iOS + Android) creada con Capacitor 8",
+  "main": "index.js",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "web": "node ../scripts/build-mobile-web.mjs",
+    "sync": "npm run web && cap sync",
+    "android:studio": "npm run sync && cap open android",
+    "ios:xcode": "npm run sync && cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.1",
+    "@capacitor/app": "^8.5.1",
+    "@capacitor/core": "^8.5.1",
+    "@capacitor/ios": "^8.5.1",
+    "@capacitor/splash-screen": "^8.5.1",
+    "@capacitor/status-bar": "^8.5.1"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.5.1"
+  }
+}
