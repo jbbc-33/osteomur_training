@@ -12,7 +12,7 @@
     "test:informe": "node tests/informe-perfil.test.js"
   },
   "engines": {
-    "node": "23"
+    "node": "24"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

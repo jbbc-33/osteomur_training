@@ -1,0 +1,20 @@
+# Contexto de build de la imagen. Railway clona el repo git, pero esto tambien
+# protege un `docker build` local: sin esto entrarian en la imagen los 150 MB de
+# mobile/ y la base de datos local de data/ con datos de prueba.
+.git
+.gitignore
+node_modules
+data
+mobile
+docs
+tests
+scripts
+*.md
+test-api.js
+_*
+*.log
+*.py
+*.txt
+logo.png
+Dockerfile
+.dockerignore

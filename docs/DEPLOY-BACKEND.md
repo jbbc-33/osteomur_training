@@ -44,7 +44,8 @@ git push -u origin main
 
 | Campo | Valor | Por qué |
 |---|---|---|
-| `build.builder` | `NIXPACKS` | Railway detecta el proyecto Node por el `package.json` |
+| `build.builder` | `DOCKERFILE` | La versión de Node se fija en la imagen, no la adivina Nixpacks |
+| `build.dockerfilePath` | `Dockerfile` | Node 24 explícito en el `FROM` |
 | `start.command` | `node server.js` | Arranque directo, sin wrapper |
 | `healthcheckPath` | `/api/health` | Railway enruta tráfico solo cuando responde |
 | `numReplicas` | `1` | SQLite no admite dos procesos sobre el mismo volumen |
@@ -52,43 +53,34 @@ git push -u origin main
 | `drainingSeconds` | `10` | Margen para el cierre ordenado |
 | `requiredMountPath` | `/data` | **Falla el deploy si falta el volumen**, en vez de perder la BD |
 
-> **No añadas `build.buildCommand: "npm ci"`.** Nixpacks monta `node_modules/.cache`
-> como volumen de caché durante la fase de build, y `npm ci` borra `node_modules`
-> entero antes de instalar: al llegar a ese punto de montaje falla con
-> `EBUSY: resource busy or locked, rmdir '/app/node_modules/.cache'`.
-> Deja que Nixpacks haga el install en su fase propia, que no tiene ese montaje.
-> El proyecto no tiene script `build`, así que la fase de build queda vacía.
+**Paso 3 — Versión de Node: la fija el `Dockerfile`.**
+
+`node:sqlite` requiere Node ≥ 23.4. Con el builder Nixpacks esto fue un problema
+real: `.nvmrc` y `engines.node` los ignoró y el servicio arrancaba con Node 18,
+PETANDO en bucle de reinicios con:
+
+```
+Error [ERR_UNKNOWN_BUILTIN_MODULE]: No such built-in module: node:sqlite
+```
+
+Por eso el repo lleva `Dockerfile`, con `FROM node:24-slim`. La versión deja de
+depender de la resolución de Nixpacks. `engines.node` y `.nvmrc` siguen en `24`
+para `nvm use` en local y para otros hostings, pero **no son los que deciden**.
+
+Si algún día se ve `Node.js v18` o `v20` en los logs, el servicio no está
+construyendo con el `Dockerfile`: revisa que el builder sea `DOCKERFILE` y que no
+haya una imagen base impuesta a mano en el dashboard.
+
+Además `db/db.js` comprueba la versión **antes** de hacer el `require` y lanza un
+error que dice qué versión usa el proceso y qué hacer, en vez de un stack del
+loader.
 
 > **Aviso inocuo:** si el log muestra `npm warn config production Use --omit=dev
 > instead`, se puede ignorar. El proyecto no tiene `devDependencies`.
 
-**Paso 3 — Versión de Node: obligatoria, y fijada por partida doble.**
-
-`node:sqlite` requiere Node ≥ 23.4 (desde ahí ya no va tras *flag*
-experimental). Nixpacks solo reconoce las majors `16`, `18`, `20`, `22`, `23`, y
-su default es **18**, que además ya está retirado de nixpkgs. Si la resolución
-falla, el build muere con:
-
-```
-error: Node.js 18.x has reached End-Of-Life and has been removed
-```
-
-Para evitarlo la versión se fija por partida doble:
-
-- `package.json` → `engines.node: "23"`. Debe ser **una major, no un rango**: con
-  `">=23.4.0"` Nixpacks no lo interpreta y cae al default 18.
-- `.nvmrc` → `23`, para `nvm use` en local y para otros hostings.
-
-Comprueba en el log del build que la línea de Node indica 23 o superior. Si
-sigue saliendo 18, añade en las *Variables* del servicio:
-
-| Variable | Valor |
-|---|---|
-| `NIXPACKS_NODE_VERSION` | `23` |
-
-(Es la variable que Nixpacks documenta con máxima prioridad. Si tienes
-`NODE_VERSION=24` de un intento anterior, **bórrala**: puede interferir con la
-resolución.)
+> **No añadas `build.buildCommand`.** Con Nixpacks montaba `node_modules/.cache`
+> como volumen de caché en la fase de build y `npm ci` fallaba al borrarlo con
+> `EBUSY: rmdir '/app/node_modules/.cache'`. Con `Dockerfile` esto no aplica.
 
 **Paso 4 — Crear el volumen, ANTES del primer deploy.** En el servicio →
 *Volumes* → *Add Volume*, con mount path `/data`. Crea primero el volumen y luego

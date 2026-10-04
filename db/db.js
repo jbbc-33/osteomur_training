@@ -1,5 +1,18 @@
 'use strict';
 
+// `node:sqlite` solo existe a partir de Node 23.4. Si el despliegue arranca con
+// una version anterior, el require de abajo lanza ERR_UNKNOWN_BUILTIN_MODULE y
+// el mensaje real (la version) se pierde en el stack del loader. Se comprueba
+// antes para que el log diga exactamente que ha ido mal y como se arregla.
+if (!process.versions || Number(process.versions.node.split('.')[0]) < 23) {
+  throw new Error(
+    `OSTEOMUR necesita Node 23.4 o superior y este proceso usa Node ${process.versions.node}. ` +
+    'La causa habitual es que la imagen o el runtime del hosting siga en Node 18 o 20. ' +
+    'En Railway, comprueba que el servicio usa el Dockerfile del repo (builder DOCKERFILE) ' +
+    'y no una imagen por defecto.'
+  );
+}
+
 const { DatabaseSync } = require('node:sqlite');
 const { DB_PATH, ensureDataDir } = require('../config/paths');
 
