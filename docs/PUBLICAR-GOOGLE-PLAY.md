@@ -23,15 +23,15 @@ npx cap sync
 
 ## 2) Identificador (package name)
 
-Ya está fijado en `mobile/capacitor.config.json` → `appId: "com.osteomur.app"`.
-Si en la Play Console ese nombre está ocupado por otra app, cámbialo **antes** de
-generar el APK/AAB (también se usa en iOS, pero es independiente por tienda):
+Ya está fijado en `mobile/capacitor.config.json` → `appId: "es.osteomur.training"`,
+que es el nombre con el que la app está registrada en la Play Console. No lo
+cambies: si lo cambias, Play ve una app distinta y no podrás publicar
+actualizaciones de la ya registrada.
 
-```jsonc
-// mobile/capacitor.config.json
-{ "appId": "com.tugimnasio.osteomur", "appName": "OSTEOMUR" }
-npx cap sync
-```
+Para que el cambio de paquete sea efectivo hay que actualizar a la vez el
+`namespace` y el `applicationId` en `mobile/android/app/build.gradle`, el `package`
+y la ruta de `MainActivity.java`, y las strings `package_name` y
+`custom_url_scheme`. Después, `npx cap sync android` y regenerar el AAB.
 
 ## 3) Firma de la release (keystore)
 

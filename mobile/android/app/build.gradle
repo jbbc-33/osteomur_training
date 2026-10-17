@@ -13,10 +13,10 @@ if (hasReleaseKeystore) {
 }
 
 android {
-    namespace = "com.osteomur.app"
+    namespace = "es.osteomur.training"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.osteomur.app"
+        applicationId "es.osteomur.training"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

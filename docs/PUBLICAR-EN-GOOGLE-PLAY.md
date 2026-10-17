@@ -11,7 +11,7 @@ queda son pasos en la consola de Google y tres datos legales que solo tienes tú
 |---|---|
 | Bundle firmado `.aab` | `mobile/android/app/build/outputs/bundle/release/app-release.aab` (5,28 MB) |
 | Firma | SHA256withRSA 4096 bits, verificada (`jar verified`) |
-| `applicationId` | `com.osteomur.app` |
+| `applicationId` | `es.osteomur.training` |
 | `versionCode` / `versionName` | `1` / `1.0.0` |
 | `targetSdkVersion` | **36** — cumple el requisito vigente desde el 31/08/2026 |
 | `minSdkVersion` | 24 (Android 7.0) |
@@ -236,9 +236,20 @@ Reglas que Play impone:
 - Cada `versionCode` debe ser **mayor** que todos los anteriores. Play **no
   permite** reutilizar uno, ni siquiera para un bundle que cambió.
 - Los mensajes de las notas de versión son obligatorios.
-- **No cambies `applicationId`.** `com.osteomur.app` pasa a ser el identificador
+- **No cambies `applicationId` a partir de ahora.** `es.osteomur.training` es el
+  identificador con el que la app está registrada en Play Console y pasa a ser
   permanente: si lo cambias, Play ve una app distinta y no podrás publicar
   actualizaciones de la que ya está publicada.
+
+> **Nota sobre el historial de este identificador.** La app quedó registrada en
+> Play Console como `es.osteomur.training`, así que el proyecto se renombró de
+> `com.osteomur.app` a `es.osteomur.training` **antes** de la primera publicación.
+> Ese cambio afecta a cuatro sitios, y deben coincidir entre sí:
+> `applicationId` y `namespace` en `mobile/android/app/build.gradle`, el `appId`
+> de `mobile/capacitor.config.json`, el `package` y la ruta de
+> `MainActivity.java`, y las strings `package_name` y `custom_url_scheme` de
+> `strings.xml`. También quedó desalineado el bundle ID de iOS: ver
+> `docs/PUBLICAR-APPLE-APP-STORE.md`.
 
 ---
 

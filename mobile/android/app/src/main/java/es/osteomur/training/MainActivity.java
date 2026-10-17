@@ -1,4 +1,4 @@
-package com.osteomur.app;
+package es.osteomur.training;
 
 import com.getcapacitor.BridgeActivity;
 

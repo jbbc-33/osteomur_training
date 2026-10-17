@@ -25,7 +25,7 @@ const ADB = path.join(
   process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'),
   'Android', 'Sdk', 'platform-tools', 'adb.exe',
 );
-const PAQUETE = 'com.osteomur.app';
+const PAQUETE = 'es.osteomur.training';
 const PUERTO = 9222;
 
 const adb = (...args) => execFileSync(ADB, args, { encoding: 'utf8' }).trim();

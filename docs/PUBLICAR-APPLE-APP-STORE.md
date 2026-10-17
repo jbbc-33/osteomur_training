@@ -11,26 +11,56 @@
 
 ---
 
-## 1) Preparar la app
+## 1) Preparar la app en el Mac
 
 ```bash
-# 1. Apunta la app a tu backend real
-OSTEOMUR_API_URL=https://TU-DOMINIO.com/api node scripts/build-mobile-web.mjs
+git clone https://github.com/jbbc-33/osteomur_training.git
+cd osteomur_training/mobile
 
-# 2. Sincroniza iOS
-cd mobile
+npm install
+
+# OBLIGATORIO: genera mobile/web con la URL real del backend
+OSTEOMUR_API_URL=https://osteomurtraining-production.up.railway.app/api npm run web
+
 npx cap sync ios
+npx cap open ios
 ```
+
+> ⚠ **No hay `Podfile`: no instales CocoaPods.** La mayoría de tutoriales de
+> Capacitor te hicieron ejecutar `pod install`; en este proyecto es un error.
+> Capacitor 8 usa **Swift Package Manager** (`mobile/ios/App/CapApp-SPM`), y Xcode
+> resuelve los paquetes solo al abrir el proyecto. La primera resolución descarga
+> `capacitor-swift-pm` y los plugins desde GitHub y puede tardar varios minutos.
+
+> ⚠ **`npm run web` es obligatorio y `OSTEOMUR_API_URL` es obligatoria.**
+> `mobile/web/` está en `.gitignore`, así que tras clonar el repositorio está
+> **vacía**: si te saltas este paso abres un proyecto en blanco.
+> Peor: si lanzas el script sin la variable, **no da error**. Inyecta el valor por
+> defecto `https://TU-API-PROD.ejemplo.com/api` y publicas una app apuntando a una
+> URL inexistente. Falla en silencio.
+>
+> Comprueba siempre que el script imprime
+> `apiBaseUrl inyectado: https://osteomurtraining-production.up.railway.app/api`.
 
 ## 2) Identificador (Bundle ID)
 
-Ya está fijado: `com.osteomur.app` (`PRODUCT_BUNDLE_IDENTIFIER` + `capacitor.config.json`).
-Debe ser **único a nivel mundial**. Si lo cambias, cámbialo en
-`mobile/capacitor.config.json` y vuelve a `cap sync`:
-
-```jsonc
-{ "appId": "com.tugimnasio.osteomur" }
-```
+> ✅ **Identificadores alineados.** Ambos usan `es.osteomur.training`:
+>
+> - Android: `applicationId` en `mobile/android/app/build.gradle` (registrado en Play Console).
+> - iOS: `PRODUCT_BUNDLE_IDENTIFIER` en las configuraciones Debug y Release de
+>   `mobile/ios/App/App.xcodeproj/project.pbxproj`.
+> - Compartido: `appId` en `mobile/capacitor.config.json`.
+>
+> Ese identificador es válido para Play, pero **no lo cambies si ya tienes la app
+> creada en App Store Connect con otro Bundle ID**: cada tienda lleva su propio
+> registro y Apple no admite cambiarlo tras la primera publicación.
+>
+> Antes de nada, registra `es.osteomur.training` como identificador explícito en
+> https://developer.apple.com/account/resources/identifiers/list. Xcode solo puede
+> firmarlo si el Bundle ID ya existe en tu cuenta; si no, da error al archivar.
+>
+> Recuerda también que `IPHONEOS_DEPLOYMENT_TARGET` sigue en iOS 15.0, y Apple
+> exige un SDK de compilación reciente en cada ciclo de revisión.
 
 ## 3) Abrir y firmar en Xcode (en el Mac)
 
@@ -51,7 +81,7 @@ En https://appstoreconnect.apple.com → **My Apps → + → New App**:
 - Platform: iOS
 - Name: **OSTEOMUR**
 - Primary language: Español (España)
-- Bundle ID: `com.osteomur.app` (el de tu cuenta)
+- Bundle ID: `es.osteomur.training` (ver la sección 2)
 - SKU: código interno libre (p. ej. `osteomur001`)
 
 ## 5) Archivar y subir (Archive)
