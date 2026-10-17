@@ -62,6 +62,46 @@ npx cap open ios
 > Recuerda tambiÃ©n que `IPHONEOS_DEPLOYMENT_TARGET` sigue en iOS 15.0, y Apple
 > exige un SDK de compilaciÃ³n reciente en cada ciclo de revisiÃ³n.
 
+## 3b) Preparar el web móvil para iOS (obligatorio al clonar en Mac)
+
+La carpeta mobile/web/ **no se versiona** (está en .gitignore). Tras clonar el repositorio en macOS, antes de 
+px cap sync ios o de abrir Xcode, genera esa carpeta con la API de producción:
+
+`ash
+cd mobile
+npm install  # solo primera vez
+OSTEOMUR_API_URL=https://osteomurtraining-production.up.railway.app/api npm run web
+`
+
+No omitas la variable de entorno. Si no la pasas, scripts/build-mobile-web.mjs usa un valor de prueba (https://TU-API-PROD.ejemplo.com/api) y la app nativa apuntará a una URL que no responde. 
+
+Notas sobre dependencias iOS:
+
+- **No uses pod install.** Este proyecto usa Capacitor 8 + Swift Package Manager (SPM). No existe Podfile.
+- Al abrir el proyecto en Xcode (
+px cap open ios), Xcode descargará automáticamente las dependencias SPM desde GitHub y de 
+ode_modules. La primera vez puede tardar varios minutos. 
+
+
+## 3b) Preparar el web móvil para iOS (obligatorio al clonar en Mac)
+
+La carpeta mobile/web/ **no se versiona** (está en .gitignore). Tras clonar el repositorio en macOS, antes de 
+px cap sync ios o de abrir Xcode, genera esa carpeta con la API de producción:
+
+`ash
+cd mobile
+npm install  # solo primera vez
+OSTEOMUR_API_URL=https://osteomurtraining-production.up.railway.app/api npm run web
+`
+
+No omitas la variable de entorno. Si no la pasas, scripts/build-mobile-web.mjs usa un valor de prueba (https://TU-API-PROD.ejemplo.com/api) y la app nativa apuntará a una URL que no responde.
+
+Notas sobre dependencias iOS:
+
+- **No uses pod install.** Este proyecto usa Capacitor 8 + Swift Package Manager (SPM). No existe Podfile.
+- Al abrir el proyecto en Xcode (
+px cap open ios), Xcode descargará automáticamente las dependencias SPM. La primera vez puede tardar varios minutos.
+
 ## 3) Abrir y firmar en Xcode (en el Mac)
 
 ```bash
