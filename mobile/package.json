@@ -1,26 +1,26 @@
 {
-    "name":  "osteomur-mobile",
-    "version":  "1.0.0",
-    "description":  "App nativa OSTEOMUR (iOS + Android) creada con Capacitor 8",
-    "main":  "index.js",
-    "private":  true,
-    "license":  "UNLICENSED",
-    "scripts":  {
-                    "web":  "node ../scripts/build-mobile-web.mjs",
-                    "sync":  "npm run web \u0026\u0026 cap sync",
-                    "android:studio":  "npm run sync \u0026\u0026 cap open android",
-                    "ios:xcode":  "npm run sync \u0026\u0026 cap open ios"
-                },
-    "dependencies":  {
-                         "@capacitor/android":  "^8.5.3",
-                         "@capacitor/app":  "^8.1.2",
-                         "@capacitor/core":  "^8.5.3",
-                         "@capacitor/ios":  "^8.5.3",
-                         "@capacitor/splash-screen":  "^8.0.2",
-                         "@capacitor/status-bar":  "^8.0.4"
-                     },
-    "devDependencies":  {
-                            "@capacitor/assets":  "^3.0.5",
-                            "@capacitor/cli":  "^8.5.3"
-                        }
+  "name": "osteomur-mobile",
+  "version": "1.0.0",
+  "description": "App nativa OSTEOMUR (iOS + Android) creada con Capacitor 8",
+  "main": "index.js",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "web": "node ../scripts/build-mobile-web.mjs",
+    "sync": "npm run web && cap sync",
+    "android:studio": "npm run sync && cap open android",
+    "ios:xcode": "npm run sync && cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.7.3",
+    "@capacitor/app": "^8.7.3",
+    "@capacitor/core": "^8.7.3",
+    "@capacitor/ios": "^8.7.3",
+    "@capacitor/splash-screen": "^8.7.3",
+    "@capacitor/status-bar": "^8.7.3"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.7.3"
+  }
 }
