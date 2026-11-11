@@ -38,6 +38,14 @@
         <div class="sub" id="next-class-where">Cada sesión consume 1 crédito · OSTEOMUR</div>
       </div>
       <p class="muted small" style="margin-bottom:14px;">Solo se muestran la semana actual y la siguiente. Cada sesión cuesta <b>1 crédito</b> de tu bono.</p>
+      <div class="sessions-toolbar">
+        <button class="btn btn-soft btn-sm calendar-btn" id="btn-sessions-calendar" aria-haspopup="dialog" aria-expanded="false">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+          Calendario
+        </button>
+        <span class="small muted" id="sessions-range"></span>
+        <div class="calendar-pop" id="sessions-calendar" role="dialog" aria-label="Calendario de sesiones" hidden></div>
+      </div>
       <div id="sessions-list"></div>
     </section>
 
@@ -45,7 +53,12 @@
     <section class="view" id="view-train">
       <h2 class="view-title">Ejercicios</h2>
       <p class="muted small">Repasa la técnica de los ejercicios de tu entrenamiento.</p>
-      <div class="ex-filter" id="ex-filter"></div>
+      <div class="search-box">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>
+        <input id="ex-search" placeholder="Buscar por nombre, descripción o etiqueta...">
+      </div>
+      <p class="small muted" style="margin:0 0 6px;">Filtrar por etiquetas: se muestran los ejercicios que incluyen todas las seleccionadas.</p>
+      <div class="ex-filter" id="ex-tag-filter"></div>
       <div id="ex-list"></div>
     </section>
 

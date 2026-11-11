@@ -6,6 +6,7 @@ const { requireAuth, publicUser } = require('../middleware/auth');
 const { lazyExpireUserCredits, getWallets } = require('../services/business');
 const { ApiError, createBooking, cancelBooking, CANCEL_WINDOW_HOURS, CANCEL_WINDOW_MS, getSessionCost } = require('../services/business');
 const { notificationKind } = require('../services/notifications');
+const { listTags, listExercisesWithTags } = require('../services/exercises');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -13,10 +14,14 @@ router.use(requireAuth);
 // ---------- Perfil / plan / reservas ----------
 router.put('/me', (req, res, next) => {
   try {
-    const { full_name, phone, avatar_photo, age, height_cm, sex, sport, active_injuries } = req.body || {};
+    const { full_name, phone, avatar_photo, age, height_cm, sex, sport, active_injuries, email_notifications } = req.body || {};
     const me = db.prepare('SELECT * FROM users WHERE id = ?').get(req.userId);
+    let wantsEmail = me.email_notifications === 0 ? 0 : 1;
+    if (email_notifications !== undefined) {
+      wantsEmail = (email_notifications === true || email_notifications === 1 || email_notifications === '1') ? 1 : 0;
+    }
     db.prepare(
-      'UPDATE users SET full_name=?, phone=?, avatar_photo=?, age=?, height_cm=?, sex=?, sport=?, active_injuries=? WHERE id=?'
+      'UPDATE users SET full_name=?, phone=?, avatar_photo=?, age=?, height_cm=?, sex=?, sport=?, active_injuries=?, email_notifications=? WHERE id=?'
     ).run(
       full_name ?? me.full_name,
       phone ?? me.phone,
@@ -26,6 +31,7 @@ router.put('/me', (req, res, next) => {
       sex ?? me.sex,
       sport ?? me.sport,
       active_injuries ?? me.active_injuries,
+      wantsEmail,
       req.userId
     );
     const fresh = lazyExpireUserCredits(req.userId);
@@ -237,8 +243,7 @@ router.get('/reports/:id', (req, res, next) => {
 // ---------- Biblioteca de ejercicios ----------
 router.get('/exercises', (req, res, next) => {
   try {
-    const ex = db.prepare('SELECT * FROM exercises ORDER BY category, name').all();
-    res.json({ exercises: ex });
+    res.json({ exercises: listExercisesWithTags(), tags: listTags() });
   } catch (e) { next(e); }
 });
 

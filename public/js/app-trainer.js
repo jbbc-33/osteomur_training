@@ -9,6 +9,8 @@ const T = {
   sessionsTab: 'attendance',
   clients: [],
   exercises: [],
+  exerciseTags: [],
+  newExerciseTags: [],
   bonoPlans: [],
   settings: {},
   ficha: null,
@@ -724,15 +726,37 @@ async function renderClientsList(search) {
             c.has_training_plan ? '<span class="badge badge-primary">Plan</span>' : '<span class="badge badge-muted">Sin plan</span>',
             c.is_active ? '' : '<span class="badge badge-err">De baja</span>',
           ].join('');
-          return `<button class="client-pill" data-open="${c.id}" style="${c.is_active ? '' : 'opacity:.65;'}">
+          return `<div class="client-pill" data-open="${c.id}" role="button" tabindex="0">
             ${avatarHtml(c, 34)}
             <span class="client-name"><b>${c.full_name}</b><br><span class="small muted">${c.email}</span></span>
             <span class="client-badges">${credBadge}${badges}</span>
+            ${c.is_active ? '' : `<button class="btn btn-sm btn-accent" data-reactivate-client="${c.id}">Reactivar</button>
+            <button class="btn btn-sm btn-danger" data-delete-client="${c.id}">Eliminar</button>`}
             <span class="pill-chev">›</span>
-          </button>`;
+          </div>`;
         })
         .join('')}`;
-    area.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('click', () => openClient(Number(b.dataset.open))));
+    area.querySelectorAll('[data-open]').forEach((el) => {
+      el.addEventListener('click', (e) => {
+        if (e.target.closest('[data-delete-client], [data-reactivate-client]')) return;
+        openClient(Number(el.dataset.open));
+      });
+      el.addEventListener('keydown', (e) => {
+        if (e.target !== el) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          openClient(Number(el.dataset.open));
+        }
+      });
+    });
+    area.querySelectorAll('[data-reactivate-client]').forEach((b) => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      reactivateClient(Number(b.dataset.reactivateClient));
+    }));
+    area.querySelectorAll('[data-delete-client]').forEach((b) => b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteClient(Number(b.dataset.deleteClient));
+    }));
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -806,9 +830,11 @@ function renderClientDetail(d) {
         <button class="btn btn-sm btn-accent" data-act="bono">Asignar bono (${exp})</button>
         <button class="btn btn-sm btn-soft" data-act="pagos">Historial de pagos</button>
         <button class="btn btn-sm btn-soft" data-act="credits">Ajustar créditos</button>
+        <button class="btn btn-sm btn-soft" data-act="password">🔑 Cambiar contraseña</button>
         ${c.is_active
           ? `<button class="btn btn-sm btn-danger" data-act="baja">Dar de baja</button>`
-          : `<button class="btn btn-sm btn-accent" data-act="react">Reactivar</button>`}
+          : `<button class="btn btn-sm btn-accent" data-act="react">Reactivar</button>
+             <button class="btn btn-sm btn-danger" data-act="delete">Eliminar</button>`}
       </div>
     </div>
 
@@ -949,8 +975,10 @@ function renderClientDetail(d) {
       if (act === 'bono') openAssignBono(c.id);
       if (act === 'pagos') openPaymentsModal(c.id);
       if (act === 'credits') openAdjustCredits(c.id);
+      if (act === 'password') openClientPasswordModal(c);
       if (act === 'baja') deactivateClient(c.id);
       if (act === 'react') reactivateClient(c.id);
+      if (act === 'delete') deleteClient(c.id);
     });
   });
 }
@@ -1029,7 +1057,7 @@ function renderLogsPage(clientId) {
 }
 
 // Combobox de ejercicios: buscador + lista desplegable con todos los ejercicios
-// guardados (filtrable por nombre o categoría). El valor elegido se guarda en el
+// guardados (filtrable por nombre o etiqueta). El valor elegido se guarda en el
 // hidden #log-exercise, longitud del pipeline de guardado sin cambios.
 function initExerciseCombobox() {
   const input = $('log-exercise-search');
@@ -1043,12 +1071,12 @@ function initExerciseCombobox() {
     const query = q.trim().toLowerCase();
     const matches = T.exercises.filter((e) => !query
       || e.name.toLowerCase().includes(query)
-      || (e.category || '').toLowerCase().includes(query));
+      || (e.tags || []).some((t) => t.name.toLowerCase().includes(query)));
     list.innerHTML = matches.length
       ? matches.slice(0, 30).map((e) =>
           `<li role="option" tabindex="-1" data-name="${esc(e.name)}">
             <span class="cb-name">${esc(e.name)}</span>
-            ${e.category ? `<span class="cb-cat">${esc(e.category)}</span>` : ''}
+            ${(e.tags || []).length ? `<span class="cb-cat">${e.tags.slice(0, 3).map((t) => esc(t.name)).join(' · ')}</span>` : ''}
           </li>`).join('')
       : '<li class="cb-empty">Sin resultados</li>';
     list.hidden = false;
@@ -3148,12 +3176,12 @@ function openAssessmentEditor(clientId, kind) {
           const q = inp.value.trim().toLowerCase();
           const matches = T.exercises.filter((e) => !q
             || e.name.toLowerCase().includes(q)
-            || (e.category || '').toLowerCase().includes(q));
+            || (e.tags || []).some((t) => t.name.toLowerCase().includes(q)));
           list.innerHTML = matches.length
             ? matches.slice(0, 30).map((e) =>
                 `<li role="option" tabindex="-1" data-name="${esc(e.name)}" data-id="${e.id}">
                   <span class="cb-name">${esc(e.name)}</span>
-                  ${e.category ? `<span class="cb-cat">${esc(e.category)}</span>` : ''}
+                  ${(e.tags || []).length ? `<span class="cb-cat">${e.tags.slice(0, 3).map((t) => esc(t.name)).join(' · ')}</span>` : ''}
                 </li>`).join('')
             : '<li class="cb-empty">Sin resultados</li>';
           list.hidden = false;
@@ -4140,6 +4168,36 @@ function openAssignBono(clientId) {
   });
 }
 
+// ---------- Asignar contraseña nueva a un cliente ----------
+function openClientPasswordModal(client) {
+  const overlay = showModal(`
+    <h3>Cambiar contraseña · ${client ? esc(client.full_name) : ''}</h3>
+    <p class="small muted">La contraseña anterior dejará de funcionar inmediatamente. El cliente recibirá un correo de confirmación.</p>
+    <div class="field"><label>Nueva contraseña (mín. 6)</label><input id="cpw-new" type="password" minlength="6" autocomplete="new-password"></div>
+    <div class="field"><label>Repetir contraseña</label><input id="cpw-repeat" type="password" minlength="6" autocomplete="new-password"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="cpw-cancel">Cancelar</button>
+      <button class="btn btn-primary" id="cpw-save">Asignar contraseña</button>
+    </div>`);
+  overlay.querySelector('#cpw-cancel').addEventListener('click', () => overlay.remove());
+  overlay.querySelector('#cpw-save').addEventListener('click', async () => {
+    const password = $('cpw-new').value;
+    const repeat = $('cpw-repeat').value;
+    if (password.length < 6) return toast('La contraseña debe tener al menos 6 caracteres', 'warn');
+    if (password !== repeat) return toast('Las dos contraseñas no coinciden', 'warn');
+    const btn = $('cpw-save');
+    btn.disabled = true;
+    try {
+      const data = await API.post('/trainer/client/' + client.id + '/password', { password });
+      toast(data.message || 'Contraseña actualizada');
+      overlay.remove();
+    } catch (e) {
+      btn.disabled = false;
+      toast(e.message, 'err');
+    }
+  });
+}
+
 function openAdjustCredits(clientId) {
   const client = T.clients.find((c) => c.id === clientId);
   const overlay = showModal(`
@@ -4196,7 +4254,7 @@ async function openPaymentsModal(clientId) {
   } catch (e) { toast(e.message, 'err'); }
 }
 
-// ---------- Baja / reactivar ----------
+// ---------- Baja / reactivar / eliminar ----------
 async function deactivateClient(clientId) {
   const c = T.clients.find((x) => x.id === clientId);
   const ok = await confirmDialog('Dar de baja', `¿Dar de baja a ${c ? c.full_name : 'este cliente'}? Se cancelarán sus próximas reservas, se devolverán sus créditos y no podrá iniciar sesión.`, 'Dar de baja');
@@ -4204,8 +4262,8 @@ async function deactivateClient(clientId) {
   try {
     const data = await API.post('/trainer/client/' + clientId + '/deactivate', {});
     toast(data.message);
-    T.fichaId = null;
-    loadClientsView();
+    // Se mantiene la ficha abierta para ofrecer reactivar o eliminar definitivamente.
+    await openClient(clientId);
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -4218,21 +4276,205 @@ async function reactivateClient(clientId) {
   } catch (e) { toast(e.message, 'err'); }
 }
 
+async function deleteClient(clientId) {
+  const c = (T.ficha && T.ficha.client && T.ficha.client.id === clientId)
+    ? T.ficha.client
+    : T.clients.find((x) => x.id === clientId);
+  const ok = await confirmDialog(
+    'Eliminar cliente',
+    `¿Eliminar a ${c ? c.full_name : 'este cliente'} de la base de datos? Se borrarán su cuenta, reservas, créditos, informes y planes. Esta acción no se puede deshacer.`,
+    'Eliminar'
+  );
+  if (!ok) return;
+  try {
+    const data = await API.del('/trainer/client/' + clientId + '/permanent');
+    toast(data.message);
+    T.fichaId = null;
+    T.ficha = null;
+    loadClientsView();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
 // ============================================================
 // EJERCICIOS · biblioteca
 // ============================================================
+function tagObjects(ids) {
+  const byId = new Map(T.exerciseTags.map((t) => [t.id, t]));
+  return ids.map((id) => byId.get(id)).filter(Boolean);
+}
+
+function tagsForExercise(exerciseId) {
+  const ex = T.exercises.find((x) => x.id === exerciseId);
+  return ex ? (ex.tags || []) : [];
+}
+
+// Selector de etiquetas: botón "+ Etiqueta" con desplegable y buscador. Las
+// etiquetas seleccionadas se muestran como pills y se pueden quitar una a una.
+function renderExerciseTagEditor(containerId, exerciseId) {
+  const box = $(containerId);
+  if (!box) return;
+  const selectedTags = exerciseId == null ? tagObjects(T.newExerciseTags) : tagsForExercise(exerciseId);
+  const selectedIds = new Set(selectedTags.map((t) => t.id));
+
+  box.innerHTML = `
+    <div class="tag-editor">
+      <div class="tag-editor-selected">
+        ${selectedTags.length
+          ? selectedTags.map((t) => `<span class="tag-pill tag-pill-removable">${esc(t.name)}<button type="button" data-remove-tag="${t.id}" title="Quitar esta etiqueta del ejercicio">×</button></span>`).join('')
+          : '<span class="tag-editor-empty">Sin etiquetas asignadas.</span>'}
+      </div>
+      <div class="tag-editor-add">
+        <button type="button" class="tag-add-btn" data-toggle-tag-menu>+ Etiqueta</button>
+        <div class="tag-menu" hidden>
+          <input type="text" class="tag-menu-search" placeholder="Buscar etiqueta..." data-tag-search>
+          <div class="tag-menu-list" data-tag-options></div>
+        </div>
+      </div>
+    </div>`;
+
+  const menu = box.querySelector('.tag-menu');
+  const search = box.querySelector('[data-tag-search]');
+  const options = box.querySelector('[data-tag-options]');
+  const toggle = box.querySelector('[data-toggle-tag-menu]');
+
+  const renderOptions = () => {
+    const q = (search.value || '').trim().toLowerCase();
+    const available = T.exerciseTags.filter((t) => !selectedIds.has(t.id)
+      && (!q || t.name.toLowerCase().includes(q)));
+    options.innerHTML = available.length
+      ? available.map((t) => `<button type="button" class="tag-menu-option" data-add-tag="${t.id}">${esc(t.name)}</button>`).join('')
+      : `<p class="tag-menu-empty">${T.exerciseTags.length
+        ? 'No hay etiquetas que coincidan.'
+        : 'Aún no hay etiquetas. Crea una en el panel superior.'}</p>`;
+  };
+
+  toggle.addEventListener('click', () => {
+    const opening = menu.hidden;
+    document.querySelectorAll('.tag-menu').forEach((m) => { if (m !== menu) m.hidden = true; });
+    menu.hidden = !opening;
+    if (opening) {
+      search.value = '';
+      renderOptions();
+      search.focus();
+    }
+  });
+
+  search.addEventListener('input', renderOptions);
+  search.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const first = options.querySelector('[data-add-tag]');
+      if (first) first.click();
+    }
+    if (e.key === 'Escape') {
+      menu.hidden = true;
+      toggle.focus();
+    }
+  });
+
+  options.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-add-tag]');
+    if (btn) addExerciseTag(exerciseId, Number(btn.dataset.addTag));
+  });
+
+  box.querySelectorAll('[data-remove-tag]').forEach((btn) => {
+    btn.addEventListener('click', () => removeExerciseTag(exerciseId, Number(btn.dataset.removeTag)));
+  });
+}
+
+function addExerciseTag(exerciseId, tagId) {
+  if (exerciseId == null) {
+    if (!T.newExerciseTags.includes(tagId)) T.newExerciseTags = [...T.newExerciseTags, tagId];
+    renderExerciseTagEditor('ex-new-tags', null);
+    return;
+  }
+  const current = tagsForExercise(exerciseId).map((t) => t.id);
+  if (!current.includes(tagId)) persistExerciseTags(exerciseId, [...current, tagId]);
+}
+
+function removeExerciseTag(exerciseId, tagId) {
+  if (exerciseId == null) {
+    T.newExerciseTags = T.newExerciseTags.filter((id) => id !== tagId);
+    renderExerciseTagEditor('ex-new-tags', null);
+    return;
+  }
+  const current = tagsForExercise(exerciseId).map((t) => t.id);
+  persistExerciseTags(exerciseId, current.filter((id) => id !== tagId));
+}
+
+// Guarda solo las etiquetas del ejercicio indicado (el resto de campos no se toca).
+async function persistExerciseTags(exerciseId, tagIds) {
+  try {
+    await API.put('/trainer/exercises/' + exerciseId, { tag_ids: tagIds });
+    const ex = T.exercises.find((x) => x.id === exerciseId);
+    if (ex) ex.tags = tagObjects(tagIds);
+    renderExerciseTagEditor('e-tags-' + exerciseId, exerciseId);
+    toast('Etiquetas del ejercicio actualizadas');
+  } catch (e) {
+    toast(e.message, 'err');
+    renderExerciseTagEditor('e-tags-' + exerciseId, exerciseId);
+  }
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.tag-editor-add')) {
+    document.querySelectorAll('.tag-menu').forEach((m) => { m.hidden = true; });
+  }
+});
+
+function renderTagManager() {
+  const box = $('tag-list');
+  if (!T.exerciseTags.length) {
+    box.innerHTML = '<p class="muted small">Aún no hay etiquetas.</p>';
+    return;
+  }
+  box.innerHTML = T.exerciseTags
+    .map((t) => `<span class="chip">${esc(t.name)}${Number(t.exercise_count) ? ` · ${t.exercise_count}` : ''}<button type="button" data-del-tag="${t.id}" title="Eliminar etiqueta de todos los ejercicios">×</button></span>`)
+    .join('');
+  box.querySelectorAll('[data-del-tag]').forEach((b) => b.addEventListener('click', async () => {
+    const tag = T.exerciseTags.find((t) => t.id === Number(b.dataset.delTag));
+    const ok = await confirmDialog(
+      'Eliminar etiqueta',
+      `¿Eliminar la etiqueta ${tag ? `<b>${esc(tag.name)}</b>` : ''}? Se quitará de todos los ejercicios que la tengan. Esta acción no se puede deshacer.`,
+      'Eliminar'
+    );
+    if (!ok) return;
+    try {
+      await API.del('/trainer/exercise-tags/' + Number(b.dataset.delTag));
+      toast('Etiqueta eliminada de todos los ejercicios');
+      loadLibrary();
+    } catch (e) { toast(e.message, 'err'); }
+  }));
+}
+
+$('btn-add-tag').addEventListener('click', async () => {
+  const name = $('tag-new-name').value.trim();
+  if (!name) return toast('Escribe un nombre para la etiqueta', 'warn');
+  try {
+    await API.post('/trainer/exercise-tags', { name });
+    $('tag-new-name').value = '';
+    toast('Etiqueta creada');
+    loadLibrary();
+  } catch (e) { toast(e.message, 'err'); }
+});
+
+$('tag-new-name').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); $('btn-add-tag').click(); }
+});
+
 $('btn-add-ex').addEventListener('click', async () => {
   const name = $('ex-new-name').value.trim();
   if (!name) return toast('El nombre es obligatorio', 'warn');
   try {
     await API.post('/trainer/exercises', {
       name,
-      category: $('ex-new-cat').value.trim() || 'Fuerza',
       video_url: $('ex-new-video').value.trim() || null,
       description: $('ex-new-desc').value.trim() || null,
       technique_tips: $('ex-new-tips').value.trim() || null,
+      tag_ids: [...T.newExerciseTags],
     });
-    ['ex-new-name', 'ex-new-cat', 'ex-new-video', 'ex-new-desc', 'ex-new-tips'].forEach((f) => ($(f).value = ''));
+    ['ex-new-name', 'ex-new-video', 'ex-new-desc', 'ex-new-tips'].forEach((f) => ($(f).value = ''));
+    T.newExerciseTags = [];
     toast('Ejercicio añadido a la biblioteca');
     loadLibrary();
   } catch (e) { toast(e.message, 'err'); }
@@ -4242,35 +4484,38 @@ async function loadLibrary() {
   try {
     const data = await API.get('/trainer/exercises');
     T.exercises = data.exercises;
+    T.exerciseTags = data.tags || [];
+    const validTagIds = new Set(T.exerciseTags.map((t) => t.id));
+    T.newExerciseTags = T.newExerciseTags.filter((id) => validTagIds.has(id));
+    renderTagManager();
+    renderExerciseTagEditor('ex-new-tags', null);
     const list = $('library-list');
     if (!data.exercises.length) { list.innerHTML = '<p class="muted">La biblioteca está vacía.</p>'; return; }
     list.innerHTML = data.exercises
       .map((e) => `<div class="exercise">
         <div class="ex-top">
-          <div><h3>${e.name}</h3><div class="ex-cat">${e.category}</div></div>
+          <div><h3>${esc(e.name)}</h3></div>
         </div>
+        <div class="field"><label>Nombre</label><input id="e-name-${e.id}" value="${esc(e.name)}"></div>
+        <div class="field"><label>Enlace del vídeo (YouTube o Shorts)</label><input id="e-video-${e.id}" value="${esc(e.video_url || '')}" placeholder="https://www.youtube.com/watch?v=... o https://youtube.com/shorts/..."></div>
         <div class="form-grid-2">
-          <div class="field"><label>Nombre</label><input id="e-name-${e.id}" value="${e.name}"></div>
-          <div class="field"><label>Categoría</label><input id="e-cat-${e.id}" value="${e.category}"></div>
+          <div class="field"><label>Descripción</label><textarea id="e-desc-${e.id}">${esc(e.description || '')}</textarea></div>
+          <div class="field"><label>Claves de técnica</label><textarea id="e-tips-${e.id}">${esc(e.technique_tips || '')}</textarea></div>
         </div>
-        <div class="field"><label>Enlace del vídeo (YouTube)</label><input id="e-video-${e.id}" value="${e.video_url || ''}" placeholder="https://www.youtube.com/watch?v=..."></div>
-        <div class="form-grid-2">
-          <div class="field"><label>Descripción</label><textarea id="e-desc-${e.id}">${e.description || ''}</textarea></div>
-          <div class="field"><label>Claves de técnica</label><textarea id="e-tips-${e.id}">${e.technique_tips || ''}</textarea></div>
-        </div>
+        <div class="field"><label>Etiquetas</label><div id="e-tags-${e.id}"></div></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn btn-sm btn-primary" data-upd="${e.id}">Guardar cambios</button>
         <button class="btn btn-sm btn-ghost" data-del="${e.id}">Eliminar</button>
       </div>
       </div>`)
       .join('');
+    data.exercises.forEach((e) => renderExerciseTagEditor('e-tags-' + e.id, e.id));
     list.querySelectorAll('[data-upd]').forEach((b) =>
       b.addEventListener('click', async () => {
         const id = Number(b.dataset.upd);
         try {
           await API.put('/trainer/exercises/' + id, {
             name: $('e-name-' + id).value.trim() || undefined,
-            category: $('e-cat-' + id).value.trim() || undefined,
             video_url: $('e-video-' + id).value.trim() || null,
             description: $('e-desc-' + id).value.trim() || null,
             technique_tips: $('e-tips-' + id).value.trim() || null,
@@ -4506,8 +4751,11 @@ function renderBonoList() {
       </div>
       ${b.is_active ? '' : '<span class="badge badge-err">Inactivo</span>'}
       <div style="display:flex;gap:6px;">
-        <button class="btn btn-sm btn-ghost" data-edit-bono="${b.id}">Editar</button>
-        ${b.is_active ? `<button class="btn btn-sm btn-danger" data-del-bono="${b.id}">Desactivar</button>` : `<button class="btn btn-sm btn-accent" data-react-bono="${b.id}">Activar</button>`}
+        ${b.is_active
+          ? `<button class="btn btn-sm btn-ghost" data-edit-bono="${b.id}">Editar</button>
+             <button class="btn btn-sm btn-danger" data-del-bono="${b.id}">Desactivar</button>`
+          : `<button class="btn btn-sm btn-accent" data-react-bono="${b.id}">Activar</button>
+             <button class="btn btn-sm btn-danger" data-remove-bono="${b.id}">Eliminar</button>`}
       </div>
     </div>`)
     .join('');
@@ -4518,6 +4766,16 @@ function renderBonoList() {
   }));
   list.querySelectorAll('[data-react-bono]').forEach((b) => b.addEventListener('click', async () => {
     try { await API.put('/trainer/bono-plans/' + Number(b.dataset.reactBono), { is_active: true }); T.bonoPlans = []; loadBonos(); } catch (e) { toast(e.message, 'err'); }
+  }));
+  list.querySelectorAll('[data-remove-bono]').forEach((b) => b.addEventListener('click', async () => {
+    const bono = T.bonoPlans.find((x) => x.id === Number(b.dataset.removeBono));
+    if (!(await confirmDialog('Eliminar bono', `¿Eliminar definitivamente el bono ${bono ? `<b>${bono.name}</b>` : ''}? Se borrará de la base de datos y de la lista. Las carteras ya asignadas a clientes se conservan con su etiqueta. Esta acción no se puede deshacer.`, 'Eliminar definitivamente'))) return;
+    try {
+      await API.del('/trainer/bono-plans/' + Number(b.dataset.removeBono) + '/permanent');
+      toast('Bono eliminado');
+      T.bonoPlans = [];
+      loadBonos();
+    } catch (e) { toast(e.message, 'err'); }
   }));
 }
 

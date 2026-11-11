@@ -48,6 +48,15 @@ try {
   if (!userCols2.includes('priorities')) db.exec("ALTER TABLE users ADD COLUMN priorities TEXT");
 } catch { /* sin migración */ }
 
+// Migración: preferencia users.email_notifications (avisos y alertas por email).
+// Por defecto activada; el cliente puede desactivarla desde Mi perfil.
+try {
+  const userCols3 = db.prepare("SELECT name FROM pragma_table_info('users')").all().map((c) => c.name);
+  if (!userCols3.includes('email_notifications')) {
+    db.exec('ALTER TABLE users ADD COLUMN email_notifications INTEGER NOT NULL DEFAULT 1');
+  }
+} catch { /* sin migración */ }
+
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,6 +76,7 @@ CREATE TABLE IF NOT EXISTS users (
   credits_balance INTEGER NOT NULL DEFAULT 0,
   credits_expires_at TEXT,
   is_active INTEGER NOT NULL DEFAULT 1,
+  email_notifications INTEGER NOT NULL DEFAULT 1,
   created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -161,6 +171,18 @@ CREATE TABLE IF NOT EXISTS exercises (
   video_url TEXT,
   description TEXT,
   technique_tips TEXT
+);
+
+-- Etiquetas libres de la biblioteca de ejercicios (creadas por el entrenador).
+CREATE TABLE IF NOT EXISTS exercise_tags (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL COLLATE NOCASE UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS exercise_tag_links (
+  exercise_id INTEGER NOT NULL REFERENCES exercises(id) ON DELETE CASCADE,
+  tag_id INTEGER NOT NULL REFERENCES exercise_tags(id) ON DELETE CASCADE,
+  PRIMARY KEY (exercise_id, tag_id)
 );
 
 CREATE TABLE IF NOT EXISTS notifications (
@@ -356,6 +378,17 @@ CREATE TABLE IF NOT EXISTS wellness_answers (
   UNIQUE(entry_id, question_id)
 );
 
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_prt_user ON password_reset_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_prt_hash ON password_reset_tokens(token_hash);
 CREATE INDEX IF NOT EXISTS idx_wellness_user ON wellness_entries(user_id, entry_date);
 CREATE INDEX IF NOT EXISTS idx_wellness_answers ON wellness_answers(entry_id);
 
@@ -373,7 +406,36 @@ CREATE INDEX IF NOT EXISTS idx_tp_user ON training_plans(user_id);
 CREATE INDEX IF NOT EXISTS idx_pkgs_user ON packages(user_id);
 CREATE INDEX IF NOT EXISTS idx_wallets_user ON credit_wallets(user_id);
 CREATE INDEX IF NOT EXISTS idx_bcs_booking ON booking_credit_spends(booking_id);
+CREATE INDEX IF NOT EXISTS idx_etl_exercise ON exercise_tag_links(exercise_id);
+CREATE INDEX IF NOT EXISTS idx_etl_tag ON exercise_tag_links(tag_id);
 `);
+
+// ---------- Migración: las antiguas categorías pasan a ser etiquetas ----------
+// Cada categoría existente se convierte en una etiqueta y se asigna a todos los
+// ejercicios que la tenían. Después se vacía la columna para que la clasificación
+// viva únicamente en las etiquetas.
+try {
+  const legacyCats = db.prepare(
+    `SELECT DISTINCT TRIM(category) AS name FROM exercises
+     WHERE category IS NOT NULL AND TRIM(category) <> ''`
+  ).all();
+  if (legacyCats.length) {
+    const insTag = db.prepare('INSERT OR IGNORE INTO exercise_tags (name) VALUES (?)');
+    const getTag = db.prepare('SELECT id FROM exercise_tags WHERE name = ? COLLATE NOCASE');
+    const getExercises = db.prepare('SELECT id FROM exercises WHERE TRIM(category) = ? COLLATE NOCASE');
+    const link = db.prepare('INSERT OR IGNORE INTO exercise_tag_links (exercise_id, tag_id) VALUES (?,?)');
+    for (const { name } of legacyCats) {
+      insTag.run(name);
+      const tag = getTag.get(name);
+      if (!tag) continue;
+      for (const ex of getExercises.all(name)) link.run(ex.id, tag.id);
+    }
+    db.prepare('UPDATE exercises SET category = NULL').run();
+    console.log(`Migración de categorías a etiquetas aplicada: ${legacyCats.length} etiqueta(s).`);
+  }
+} catch (e) {
+  console.warn('Migración de categorías a etiquetas no aplicada:', e.message);
+}
 
 // ---------- Migración: carteras de créditos por bono ----------
 // Convierte el saldo único del usuario (users.credits_balance) en carteras por

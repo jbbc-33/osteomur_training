@@ -4,6 +4,7 @@ const fs = require('fs');
 const webpush = require('web-push');
 const { db } = require('../db/db');
 const { slotStartDateTime } = require('../db/db');
+const mailer = require('./mailer');
 
 const { VAPID_FILE, ensureDataDir } = require('../config/paths');
 const CONTACT = 'mailto:admin@osteomur.es';
@@ -45,9 +46,38 @@ async function sendPush(userId, title, body) {
   }
 }
 
-async function notify(userId, title, body, type, dedupKey) {
+function appLink() {
+  const base = process.env.PUBLIC_BASE_URL || process.env.APP_BASE_URL;
+  if (!base) return null;
+  return `${String(base).replace(/\/+$/, '')}/client.html`;
+}
+
+// Copia por email de los avisos y alertas. Solo para clientes que no hayan
+// desactivado la preferencia. Los correos de recuperación/seguridad no pasan
+// por aquí: se envían siempre desde services/passwords.js.
+function sendNotificationEmail(userId, title, body, type) {
+  try {
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+    if (!user || user.role !== 'client' || !user.email) return;
+    if (user.email_notifications === 0) return;
+    Promise.resolve(mailer.sendNotificationEmail(user, {
+      title,
+      body,
+      kind: notificationKind(type),
+      link: appLink(),
+    })).catch((e) => {
+      console.warn('[notifications] No se pudo enviar el aviso por email:', e.message);
+    });
+  } catch (e) {
+    console.warn('[notifications] No se pudo preparar el aviso por email:', e.message);
+  }
+}
+
+async function notify(userId, title, body, type, dedupKey, options = {}) {
   const created = createNotification(userId, title, body, type, dedupKey);
-  if (created) await sendPush(userId, title, body);
+  if (!created) return false;
+  await sendPush(userId, title, body);
+  if (options.email !== false) sendNotificationEmail(userId, title, body, type);
   return created;
 }
 

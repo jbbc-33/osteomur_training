@@ -426,4 +426,53 @@ function deactivateClient(userId) {
   }
 }
 
-module.exports = { ApiError, lazyExpireUserCredits, sweepExpiredWallets, getWallets, getSettings, getSessionCost, updateSettings, assignPackage, adjustCredits, createBooking, cancelBooking, cancelSlot, deactivateClient, CANCEL_WINDOW_HOURS, CANCEL_WINDOW_MS };
+// Eliminar definitivamente a un cliente dado de baja: borra la cuenta y todos
+// sus datos asociados (reservas, créditos, informes, planes, valoraciones...).
+// Solo se permite sobre clientes ya dados de baja para evitar borrados accidentales.
+function deleteClientPermanently(userId) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+    if (!user) throw new ApiError(404, 'Cliente no encontrado');
+    if (user.role !== 'client') throw new ApiError(400, 'Solo se puede eliminar a clientes');
+    if (user.is_active !== 0) throw new ApiError(400, 'Da de baja al cliente antes de eliminarlo');
+
+    // Repartos de créditos de sus reservas y de sus carteras (FK a bookings y credit_wallets).
+    db.prepare(
+      `DELETE FROM booking_credit_spends
+       WHERE booking_id IN (SELECT id FROM bookings WHERE user_id = ?)
+          OR wallet_id IN (SELECT id FROM credit_wallets WHERE user_id = ?)`
+    ).run(userId, userId);
+
+    // Tablas con datos del cliente. Las tablas hijas (tests, comidas, ejercicios
+    // del plan, respuestas wellness) se borran en cascada por sus FK.
+    const tables = [
+      'bookings',
+      'session_logs',
+      'body_compositions',
+      'reports',
+      'notifications',
+      'push_subscriptions',
+      'packages',
+      'credit_transactions',
+      'credit_wallets',
+      'assessments',
+      'wellness_entries',
+      'nutrition_plans',
+      'training_plans',
+    ];
+    for (const table of tables) {
+      db.prepare(`DELETE FROM ${table} WHERE user_id = ?`).run(userId);
+    }
+
+    db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+    db.exec('COMMIT');
+    broadcast('session.updated', { reason: 'client_deleted' });
+    return { deleted: true };
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+}
+
+module.exports = { ApiError, lazyExpireUserCredits, sweepExpiredWallets, getWallets, getSettings, getSessionCost, updateSettings, assignPackage, adjustCredits, createBooking, cancelBooking, cancelSlot, deactivateClient, deleteClientPermanently, CANCEL_WINDOW_HOURS, CANCEL_WINDOW_MS };

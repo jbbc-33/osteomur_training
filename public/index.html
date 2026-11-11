@@ -35,6 +35,19 @@
           <input id="login-password" type="password" required placeholder="••••••••">
         </div>
         <button class="btn btn-primary btn-block btn-lg" type="submit">Entrar</button>
+        <button type="button" class="auth-link" id="link-forgot">¿Has olvidado tu contraseña?</button>
+      </form>
+
+      <!-- Recuperar contraseña -->
+      <form id="form-forgot" style="display:none;">
+        <p class="small muted" style="margin-top:0;">Escribe el email de tu cuenta y te enviaremos un enlace para crear una contraseña nueva.</p>
+        <div class="field">
+          <label for="forgot-email">Email</label>
+          <input id="forgot-email" type="email" required placeholder="tu@email.com">
+        </div>
+        <button class="btn btn-primary btn-block btn-lg" type="submit" id="forgot-submit">Enviar enlace</button>
+        <div class="notice-box" id="forgot-ok" style="display:none;"></div>
+        <button type="button" class="auth-link" id="link-back-login">Volver a iniciar sesión</button>
       </form>
 
       <!-- Registro -->
@@ -80,19 +93,6 @@
           Tu cuenta es de cliente. Pide a tu entrenador que active tu bono de créditos.
         </p>
       </form>
-
-      <div class="demo-box">
-        <b>Cuentas de demostración</b> (contraseña <b>demo1234</b>):
-        <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">
-          <button type="button" data-email="entrenador@osteomur.es">Entrenador</button>
-          <button type="button" data-email="carlos@demo.com">Carlos</button>
-          <button type="button" data-email="marta@demo.com">Marta</button>
-          <button type="button" data-email="luis@demo.com">Luis</button>
-          <button type="button" data-email="ana@demo.com">Ana</button>
-          <button type="button" data-email="pedro@demo.com">Pedro</button>
-          <button type="button" data-email="laura@demo.com">Laura</button>
-        </div>
-      </div>
     </div>
   </div>
 
@@ -107,12 +107,21 @@
 
     $('tab-login').addEventListener('click', () => switchTab('login'));
     $('tab-register').addEventListener('click', () => switchTab('register'));
+    $('link-forgot').addEventListener('click', () => switchTab('forgot'));
+    $('link-back-login').addEventListener('click', () => switchTab('login'));
+
     function switchTab(t) {
       hideErr();
-      $('tab-login').classList.toggle('active', t === 'login');
+      $('tab-login').classList.toggle('active', t === 'login' || t === 'forgot');
       $('tab-register').classList.toggle('active', t === 'register');
       $('form-login').style.display = t === 'login' ? '' : 'none';
       $('form-register').style.display = t === 'register' ? '' : 'none';
+      $('form-forgot').style.display = t === 'forgot' ? '' : 'none';
+      if (t === 'forgot') {
+        $('forgot-ok').style.display = 'none';
+        $('forgot-submit').disabled = false;
+        $('forgot-email').focus();
+      }
     }
 
     $('form-login').addEventListener('submit', async (e) => {
@@ -143,20 +152,25 @@
       } catch (err) { showErr(err.message); }
     });
 
+    $('form-forgot').addEventListener('submit', async (e) => {
+      e.preventDefault(); hideErr();
+      const okBox = $('forgot-ok');
+      okBox.style.display = 'none';
+      $('forgot-submit').disabled = true;
+      try {
+        const data = await API.post('/auth/forgot-password', { email: $('forgot-email').value.trim() });
+        okBox.textContent = data.message;
+        okBox.style.display = 'block';
+      } catch (err) {
+        $('forgot-submit').disabled = false;
+        showErr(err.message);
+      }
+    });
+
     function finish(data) {
       API.setAuth(data.token, data.user);
       location.href = data.user.role === 'trainer' ? '/trainer.html' : '/client.html';
     }
-
-    // Autocompletar credenciales de demo
-    document.querySelectorAll('.demo-box button').forEach((b) => {
-      b.addEventListener('click', () => {
-        $('login-email').value = b.dataset.email;
-        $('login-password').value = 'demo1234';
-        switchTab('login');
-        $('form-login').requestSubmit();
-      });
-    });
   </script>
   <script src="/js/native.js"></script>
 </body>

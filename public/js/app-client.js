@@ -5,7 +5,12 @@ const $ = (id) => document.getElementById(id);
 let state = {
   user: API.getUser(),
   exercises: [],
+  exerciseTags: [],
+  exerciseSelectedTagIds: [],
   sessionCost: 1,
+  sessionWeeks: [],
+  sessionToday: null,
+  calendarMonth: null,
 };
 
 let progressData = null;
@@ -32,7 +37,7 @@ function go(view) {
   $('notif-panel').style.display = 'none';
   $('profile-modal').style.display = 'none';
   if (view === 'sessions') loadSessions();
-  if (view === 'train') loadExercises();
+  if (view === 'train') loadExercises(true);
   if (view === 'wellness') loadWellness();
   if (view === 'progress') loadProgress();
   window.scrollTo({ top: 0 });
@@ -177,44 +182,222 @@ function slotBody(s) {
   </div>`;
 }
 
+// Devuelve las semanas visibles: nunca días ni franjas ya pasadas. La primera
+// fecha mostrada es siempre hoy.
+function visibleSessionWeeks(weeks, todayStr) {
+  return weeks
+    .map((week) => ({
+      ...week,
+      days: week.days
+        .filter((day) => day.date >= todayStr)
+        .map((day) => ({
+          ...day,
+          slots: (day.slots || []).filter((s) => !s.has_passed),
+        })),
+    }))
+    .filter((week) => week.days.length);
+}
+
 async function loadSessions() {
   try {
     const data = await API.get('/sessions');
     state.sessionCost = data.session_cost || 1;
-    const todayStr = data.today;
-    const thisWeekStart = Dates.toISO(Dates.startOfWeek(new Date()));
+    state.sessionToday = data.today || Dates.todayStr();
+    state.sessionWeeks = visibleSessionWeeks(data.weeks || [], state.sessionToday);
 
     renderNextClass(data);
-
-    $('sessions-list').innerHTML = data.weeks
-      .map((week, wi) => {
-        const isThisWeek = week.week_start === thisWeekStart;
-        const weekTitle = isThisWeek ? 'Esta semana' : 'Próxima semana';
-        const daysHtml = week.days
-          .map((day) => {
-            const isToday = day.date === todayStr;
-            const slotsHtml = day.slots.map(slotBody).join('');
-            return `<div class="day-card">
-              <div class="day-head">
-                <div class="wd ${isToday ? 'is-today' : ''}">${day.weekday}${isToday ? ' · hoy' : ''}</div>
-                <div class="dnum">${day.day_number} ${Dates.parse(day.date).toLocaleDateString('es-ES', { month: 'short' })}</div>
-              </div>
-              ${slotsHtml || '<p class="muted small">Sin sesiones este día.</p>'}
-            </div>`;
-          })
-          .join('');
-        return `<div class="section-label">${weekTitle}</div>${daysHtml}`;
-      })
-      .join('');
-
-    $('sessions-list').querySelectorAll('[data-book]').forEach((btn) => {
-      btn.addEventListener('click', () => bookSlot(Number(btn.dataset.book)));
-    });
-    $('sessions-list').querySelectorAll('[data-cancel]').forEach((btn) => {
-      btn.addEventListener('click', () => cancelBooking(Number(btn.dataset.cancel)));
-    });
+    renderSessionsList();
+    renderSessionsRange();
+    renderSessionsCalendar();
   } catch (e) { toast(e.message, 'err'); }
 }
+
+function renderSessionsRange() {
+  const label = $('sessions-range');
+  if (!label) return;
+  const dates = state.sessionWeeks.flatMap((w) => w.days.map((d) => d.date)).sort();
+  if (!dates.length) { label.textContent = ''; return; }
+  const last = Dates.parse(dates[dates.length - 1]).toLocaleDateString('es-ES', {
+    weekday: 'long', day: 'numeric', month: 'short',
+  });
+  label.textContent = 'Reservas abiertas hasta el ' + last;
+}
+
+function renderSessionsList() {
+  const todayStr = state.sessionToday;
+  const box = $('sessions-list');
+  const thisWeekStart = Dates.toISO(Dates.startOfWeek(new Date()));
+
+  if (!state.sessionWeeks.some((w) => w.days.some((d) => d.slots.length))) {
+    box.innerHTML = '<p class="muted">No hay sesiones disponibles en este momento.</p>';
+    return;
+  }
+
+  box.innerHTML = state.sessionWeeks
+    .map((week) => {
+      const weekTitle = week.week_start === thisWeekStart ? 'Esta semana' : 'Próxima semana';
+      const daysHtml = week.days
+        .map((day) => {
+          const isToday = day.date === todayStr;
+          const slotsHtml = day.slots.map(slotBody).join('');
+          const emptyText = isToday
+            ? 'No quedan sesiones disponibles hoy.'
+            : 'Sin sesiones disponibles este día.';
+          return `<div class="day-card" id="day-${day.date}" data-date="${day.date}">
+            <div class="day-head">
+              <div class="wd ${isToday ? 'is-today' : ''}">${day.weekday}${isToday ? ' · hoy' : ''}</div>
+              <div class="dnum">${day.day_number} ${Dates.parse(day.date).toLocaleDateString('es-ES', { month: 'short' })}</div>
+            </div>
+            ${slotsHtml || `<p class="muted small">${emptyText}</p>`}
+          </div>`;
+        })
+        .join('');
+      return `<div class="section-label">${weekTitle}</div>${daysHtml}`;
+    })
+    .join('');
+
+  box.querySelectorAll('[data-book]').forEach((btn) => {
+    btn.addEventListener('click', () => bookSlot(Number(btn.dataset.book)));
+  });
+  box.querySelectorAll('[data-cancel]').forEach((btn) => {
+    btn.addEventListener('click', () => cancelBooking(Number(btn.dataset.cancel)));
+  });
+}
+
+// ---------- Calendario desplegable de sesiones ----------
+function monthKey(date) {
+  return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0');
+}
+
+function monthFromISO(dateStr) {
+  const [y, m] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, 1);
+}
+
+function addMonths(date, n) {
+  return new Date(date.getFullYear(), date.getMonth() + n, 1);
+}
+
+// Índice por fecha con las franjas visibles y si el usuario puede reservar
+// (o ya tiene una reserva) ese día.
+function sessionDayIndex() {
+  const index = new Map();
+  for (const week of state.sessionWeeks) {
+    for (const day of week.days) {
+      const visible = day.slots.filter((s) => !s.has_passed);
+      const bookable = visible.some((s) => !s.cancelled && (s.my_booking_id || !s.is_full));
+      index.set(day.date, { visible: visible.length, bookable });
+    }
+  }
+  return index;
+}
+
+function setSessionCalendarOpen(open) {
+  const pop = $('sessions-calendar');
+  const btn = $('btn-sessions-calendar');
+  if (!pop || !btn) return;
+  pop.hidden = !open;
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (open) renderSessionsCalendar();
+}
+
+function renderSessionsCalendar() {
+  const pop = $('sessions-calendar');
+  if (!pop) return;
+  const index = sessionDayIndex();
+  const dates = [...index.keys()].sort();
+  if (!dates.length) {
+    pop.innerHTML = '<p class="calendar-empty">No hay días con sesiones disponibles.</p>';
+    return;
+  }
+
+  const firstMonth = monthFromISO(dates[0]);
+  const lastMonth = monthFromISO(dates[dates.length - 1]);
+  if (!state.calendarMonth) {
+    const todayMonth = monthFromISO(state.sessionToday || dates[0]);
+    state.calendarMonth = (monthKey(todayMonth) >= monthKey(firstMonth) && monthKey(todayMonth) <= monthKey(lastMonth))
+      ? todayMonth
+      : firstMonth;
+  } else if (monthKey(state.calendarMonth) < monthKey(firstMonth) || monthKey(state.calendarMonth) > monthKey(lastMonth)) {
+    state.calendarMonth = firstMonth;
+  }
+
+  const year = state.calendarMonth.getFullYear();
+  const month = state.calendarMonth.getMonth();
+  const firstWeekday = (new Date(year, month, 1).getDay() + 6) % 7; // lunes = 0
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const monthLabel = state.calendarMonth.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+  const canPrev = monthKey(state.calendarMonth) > monthKey(firstMonth);
+  const canNext = monthKey(state.calendarMonth) < monthKey(lastMonth);
+
+  let cells = '';
+  for (let i = 0; i < firstWeekday; i += 1) cells += '<span class="cal-blank"></span>';
+  for (let dayNum = 1; dayNum <= daysInMonth; dayNum += 1) {
+    const ds = Dates.toISO(new Date(year, month, dayNum));
+    const info = index.get(ds);
+    const isToday = ds === state.sessionToday;
+    const available = !!info && info.bookable;
+    const hasSlots = !!info && info.visible > 0;
+    const cls = ['cal-day', available ? 'available' : '', hasSlots && !available ? 'has-slots' : '', isToday ? 'is-today' : '']
+      .filter(Boolean)
+      .join(' ');
+    const title = available
+      ? 'Ir a este día'
+      : hasSlots
+        ? 'Sin plazas disponibles'
+        : 'Sin sesiones';
+    cells += `<button type="button" class="${cls}" ${available ? `data-cal-day="${ds}"` : 'disabled'} title="${title}">${dayNum}${available ? '<span class="cal-dot"></span>' : ''}</button>`;
+  }
+
+  pop.innerHTML = `
+    <div class="calendar-head">
+      <button type="button" class="calendar-nav" data-cal-prev ${canPrev ? '' : 'disabled'} aria-label="Mes anterior">‹</button>
+      <div class="calendar-title">${esc(monthLabel)}</div>
+      <button type="button" class="calendar-nav" data-cal-next ${canNext ? '' : 'disabled'} aria-label="Mes siguiente">›</button>
+    </div>
+    <div class="calendar-grid">
+      ${['L', 'M', 'X', 'J', 'V', 'S', 'D'].map((d) => `<span class="calendar-weekday">${d}</span>`).join('')}
+      ${cells}
+    </div>
+    <p class="calendar-hint">Los días marcados tienen plazas disponibles.</p>`;
+
+  pop.querySelector('[data-cal-prev]')?.addEventListener('click', () => {
+    state.calendarMonth = addMonths(state.calendarMonth, -1);
+    renderSessionsCalendar();
+  });
+  pop.querySelector('[data-cal-next]')?.addEventListener('click', () => {
+    state.calendarMonth = addMonths(state.calendarMonth, 1);
+    renderSessionsCalendar();
+  });
+  pop.querySelectorAll('[data-cal-day]').forEach((btn) => {
+    btn.addEventListener('click', () => goToSessionDay(btn.dataset.calDay));
+  });
+}
+
+function goToSessionDay(dateStr) {
+  const card = $('day-' + dateStr);
+  if (!card) return;
+  setSessionCalendarOpen(false);
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  card.classList.remove('day-target');
+  void card.offsetWidth;
+  card.classList.add('day-target');
+  window.setTimeout(() => card.classList.remove('day-target'), 1600);
+}
+
+$('btn-sessions-calendar').addEventListener('click', (e) => {
+  e.stopPropagation();
+  setSessionCalendarOpen($('sessions-calendar').hidden);
+});
+
+document.addEventListener('click', (e) => {
+  if (e.target.closest('#sessions-calendar') || e.target.closest('#btn-sessions-calendar')) return;
+  setSessionCalendarOpen(false);
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') setSessionCalendarOpen(false);
+});
 
 async function renderNextClass(data) {
   const upcoming = [];
@@ -273,48 +456,169 @@ async function cancelBooking(bookingId) {
 }
 
 // ---------- EJERCICIOS (biblioteca) ----------
-async function loadExercises(filter) {
+async function loadExercises(force) {
   try {
-    if (!state.exercises.length) {
+    if (force || !state.exercises.length) {
       const data = await API.get('/exercises');
       state.exercises = data.exercises;
+      state.exerciseTags = data.tags || [];
+      // Si el entrenador eliminó alguna etiqueta, deja de estar seleccionada.
+      if (state.exerciseSelectedTagIds.length) {
+        const valid = new Set(state.exerciseTags.map((t) => t.id));
+        state.exerciseSelectedTagIds = state.exerciseSelectedTagIds.filter((id) => valid.has(id));
+      }
     }
-    const cats = ['Todos', ...new Set(state.exercises.map((e) => e.category))];
-    $('ex-filter').innerHTML = cats
-      .map((c) => `<button class="${c === (filter || 'Todos') ? 'active' : ''}" data-cat="${c}">${c}</button>`)
-      .join('');
-    $('ex-filter').querySelectorAll('button').forEach((b) => {
-      b.addEventListener('click', () => loadExercises(b.dataset.cat));
-    });
-    const list = state.exercises.filter((e) => !filter || filter === 'Todos' || e.category === filter);
-    $('ex-list').innerHTML = list
-      .map((e) => {
-        const video = e.video_url
-          ? embedVideo(e.video_url)
-          : '<div class="video-placeholder">El vídeo explicativo estará disponible próximamente.</div>';
-        return `<div class="exercise">
-          <div class="ex-top"><div><h3>${e.name}</h3><div class="ex-cat">${e.category}</div></div></div>
-          <p>${e.description || ''}</p>
-          ${e.technique_tips ? `<div class="tips"><b>Claves de técnica:</b> ${e.technique_tips}</div>` : ''}
-          ${video}
-        </div>`;
-      })
-      .join('');
+    renderTagFilters();
+    renderExerciseList();
   } catch (e) { toast(e.message, 'err'); }
 }
 
+function renderTagFilters() {
+  const selected = new Set(state.exerciseSelectedTagIds);
+  const tags = state.exerciseTags || [];
+  $('ex-tag-filter').innerHTML = tags.length
+    ? `<button class="${selected.size ? '' : 'active'}" data-tag-all="1">Todas</button>`
+      + tags.map((t) => `<button class="${selected.has(t.id) ? 'active' : ''}" data-tag="${t.id}">${esc(t.name)}</button>`).join('')
+    : '<span class="small muted">Sin etiquetas disponibles.</span>';
+  const allBtn = $('ex-tag-filter').querySelector('[data-tag-all]');
+  if (allBtn) {
+    allBtn.addEventListener('click', () => {
+      state.exerciseSelectedTagIds = [];
+      renderTagFilters();
+      renderExerciseList();
+    });
+  }
+  $('ex-tag-filter').querySelectorAll('[data-tag]').forEach((b) => {
+    b.addEventListener('click', () => {
+      const id = Number(b.dataset.tag);
+      state.exerciseSelectedTagIds = selected.has(id)
+        ? state.exerciseSelectedTagIds.filter((x) => x !== id)
+        : [...state.exerciseSelectedTagIds, id];
+      renderTagFilters();
+      renderExerciseList();
+    });
+  });
+}
+
+function renderExerciseList() {
+  const query = ($('ex-search').value || '').trim().toLowerCase();
+  const selected = state.exerciseSelectedTagIds;
+  const list = state.exercises.filter((e) => {
+    // Varias etiquetas a la vez: el ejercicio debe tenerlas todas (AND).
+    if (selected.length) {
+      const ids = new Set((e.tags || []).map((t) => t.id));
+      if (!selected.every((id) => ids.has(id))) return false;
+    }
+    if (query) {
+      const haystack = [
+        e.name,
+        e.description,
+        e.technique_tips,
+        ...(e.tags || []).map((t) => t.name),
+      ].join(' ').toLowerCase();
+      if (!haystack.includes(query)) return false;
+    }
+    return true;
+  });
+
+  const box = $('ex-list');
+  if (!list.length) {
+    box.innerHTML = '<p class="muted">No hay ejercicios que coincidan con la búsqueda o los filtros.</p>';
+    return;
+  }
+  box.innerHTML = list
+    .map((e) => {
+      const video = e.video_url
+        ? embedVideo(e.video_url)
+        : '<div class="video-placeholder">El vídeo explicativo estará disponible próximamente.</div>';
+      const tags = (e.tags || []).length
+        ? `<div class="exercise-tags">${e.tags.map((t) => `<span class="tag-pill">${esc(t.name)}</span>`).join('')}</div>`
+        : '';
+      return `<div class="exercise">
+        <div class="ex-top"><div><h3>${esc(e.name)}</h3></div></div>
+        ${tags}
+        <p>${esc(e.description || '')}</p>
+        ${e.technique_tips ? `<div class="tips"><b>Claves de técnica:</b> ${esc(e.technique_tips)}</div>` : ''}
+        ${video}
+      </div>`;
+    })
+    .join('');
+}
+
+$('ex-search').addEventListener('input', renderExerciseList);
+
+// Normaliza el enlace pegado por el entrenador (admite enlaces sin https://).
+function normalizeVideoUrl(url) {
+  const s = String(url || '').trim();
+  if (!s) return '';
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(s) ? s : 'https://' + s;
+}
+
+// Detecta enlaces de YouTube y extrae el ID del vídeo. Admite enlaces
+// horizontales (watch, youtu.be, embed, live) y verticales (shorts).
+function parseYouTube(url) {
+  let u;
+  try { u = new URL(normalizeVideoUrl(url)); } catch { return null; }
+
+  const host = u.hostname.replace(/^www\./i, '').toLowerCase();
+  const isYouTube = host === 'youtube.com'
+    || host === 'm.youtube.com'
+    || host === 'music.youtube.com'
+    || host === 'youtube-nocookie.com'
+    || host === 'youtu.be';
+  if (!isYouTube) return null;
+
+  // Los IDs de YouTube tienen 11 caracteres (letras, números, - y _).
+  const cleanId = (id) => (id && /^[A-Za-z0-9_-]{11}$/.test(id) ? id : null);
+  const parts = u.pathname.split('/').filter(Boolean);
+  let id = null;
+  let vertical = false;
+
+  if (host === 'youtu.be') {
+    id = cleanId(parts[0]);
+  } else if (['shorts', 'embed', 'live', 'v'].includes(parts[0])) {
+    id = cleanId(parts[1]);
+    vertical = parts[0] === 'shorts';
+  } else if (parts[0] === 'watch' || u.searchParams.get('v')) {
+    id = cleanId(u.searchParams.get('v'));
+  }
+
+  return id ? { id, vertical } : null;
+}
+
 function embedVideo(url) {
-  let embed = null;
+  const link = normalizeVideoUrl(url);
+  const yt = parseYouTube(link);
+  if (yt) {
+    // rel=0 evita vídeos sugeridos ajenos al canal; playsinline permite
+    // reproducir sin salir a pantalla completa en móviles.
+    const params = new URLSearchParams({ rel: '0', playsinline: '1', modestbranding: '1' });
+    const src = 'https://www.youtube.com/embed/' + yt.id + '?' + params.toString();
+    const cls = yt.vertical ? 'video-embed video-embed-vertical' : 'video-embed';
+    return `<div class="${cls}"><iframe
+      src="${esc(src)}"
+      title="Vídeo explicativo del ejercicio"
+      frameborder="0"
+      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
+      allowfullscreen
+      playsinline
+      loading="lazy"></iframe></div>`;
+  }
+
+  // Archivos de vídeo directos (mp4, webm, etc.): se reproducen con el
+  // reproductor nativo del navegador, también dentro de la app.
   try {
-    const u = new URL(url);
-    if (u.hostname.includes('youtube.com') && u.searchParams.get('v')) {
-      embed = 'https://www.youtube.com/embed/' + u.searchParams.get('v');
-    } else if (u.hostname.includes('youtu.be')) {
-      embed = 'https://www.youtube.com/embed/' + u.pathname.slice(1);
+    const u = new URL(link);
+    if (/\.(mp4|webm|ogv|ogg|mov|m4v)$/i.test(u.pathname)) {
+      return `<div class="video-embed video-embed-native"><video
+        src="${esc(link)}"
+        controls
+        playsinline
+        preload="metadata"></video></div>`;
     }
   } catch { /* noop */ }
-  if (embed) return `<div class="video-embed"><iframe src="${embed}" frameborder="0" allowfullscreen loading="lazy"></iframe></div>`;
-  return `<div class="video-placeholder">Abrir vídeo externo:<br><a href="${url}" target="_blank" rel="noopener">${url}</a></div>`;
+
+  return `<div class="video-placeholder">Abrir vídeo externo:<br><a href="${esc(link)}" target="_blank" rel="noopener">${esc(link)}</a></div>`;
 }
 
 // ---------- WELLNESS (cuestionario diario) ----------
@@ -719,8 +1023,24 @@ async function openProfile() {
       <div class="field"><label>Lesiones activas</label><textarea id="pf-injuries">${u.active_injuries || ''}</textarea></div>
       <button class="btn btn-primary btn-block" id="btn-save-profile">Guardar cambios</button>
       <div class="ficha-section" style="margin-top:14px;">
+        <h3>Seguridad</h3>
+        <p class="small muted">Cambia tu contraseña. Necesitas introducir la actual; al guardar, las anteriores dejarán de funcionar.</p>
+        <div class="field"><label>Contraseña actual</label><input id="pf-current-pw" type="password" autocomplete="current-password"></div>
+        <div class="form-grid-2">
+          <div class="field"><label>Nueva contraseña (mín. 6)</label><input id="pf-new-pw" type="password" minlength="6" autocomplete="new-password"></div>
+          <div class="field"><label>Repetir nueva</label><input id="pf-repeat-pw" type="password" minlength="6" autocomplete="new-password"></div>
+        </div>
+        <button class="btn btn-soft btn-block" id="btn-change-password">Actualizar contraseña</button>
+        <p class="field-hint">Si no recuerdas la actual, cierra sesión y pulsa “¿Has olvidado tu contraseña?”.</p>
+      </div>
+      <div class="ficha-section" style="margin-top:14px;">
         <h3>Notificaciones</h3>
         <p class="small muted">Recibe recordatorios de tus clases y avisos de caducidad de créditos.</p>
+        <label class="check-row">
+          <input type="checkbox" id="pf-email-notif" ${u.email_notifications === 0 ? '' : 'checked'}>
+          <span>Recibir también por email los avisos y alertas</span>
+        </label>
+        <p class="field-hint">Los correos de recuperación de cuenta y seguridad no se pueden desactivar.</p>
         <button class="btn btn-soft btn-block" id="btn-enable-push">Activar notificaciones push</button>
         <span id="push-status"></span>
       </div>
@@ -745,6 +1065,21 @@ async function openProfile() {
         toast('Perfil actualizado');
       } catch (e) { toast(e.message, 'err'); }
     });
+    $('btn-change-password').addEventListener('click', async () => {
+      const current = $('pf-current-pw').value;
+      const next = $('pf-new-pw').value;
+      const repeat = $('pf-repeat-pw').value;
+      if (!current) return toast('Introduce tu contraseña actual', 'warn');
+      if (next.length < 6) return toast('La nueva contraseña debe tener al menos 6 caracteres', 'warn');
+      if (next !== repeat) return toast('Las contraseñas nuevas no coinciden', 'warn');
+      try {
+        await API.put('/auth/password', { current_password: current, new_password: next });
+        $('pf-current-pw').value = '';
+        $('pf-new-pw').value = '';
+        $('pf-repeat-pw').value = '';
+        toast('Contraseña actualizada. Solo funciona la nueva.');
+      } catch (e) { toast(e.message, 'err'); }
+    });
     $('pf-avatar-upload').addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
@@ -767,6 +1102,20 @@ async function openProfile() {
         $('push-status').textContent = ok ? ' ✓ Activado' : ' (no disponible en este navegador)';
         if (ok) toast('Notificaciones push activadas');
       } catch (e) { toast(e.message, 'err'); }
+    });
+    $('pf-email-notif').addEventListener('change', async (e) => {
+      try {
+        const data = await API.put('/me', { email_notifications: e.target.checked });
+        state.user = data.user;
+        API.setUser(data.user);
+        renderHeader();
+        toast(e.target.checked
+          ? 'Recibirás los avisos también por email'
+          : 'Ya no recibirás los avisos por email');
+      } catch (err) {
+        e.target.checked = !e.target.checked;
+        toast(err.message, 'err');
+      }
     });
   } catch (e) { toast(e.message, 'err'); }
 }

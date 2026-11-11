@@ -29,6 +29,8 @@ DELETE FROM slots;
 DELETE FROM class_templates;
 DELETE FROM training_plan_exercises;
 DELETE FROM training_plans;
+DELETE FROM exercise_tag_links;
+DELETE FROM exercise_tags;
 DELETE FROM nutrition_meals;
 DELETE FROM nutrition_plans;
 DELETE FROM bono_plans;
@@ -36,6 +38,7 @@ DELETE FROM app_settings;
 DELETE FROM deleted_slots;
 DELETE FROM credit_wallets;
 DELETE FROM exercises;
+DELETE FROM password_reset_tokens;
 DELETE FROM users;
 DELETE FROM sqlite_sequence;
 `);
@@ -188,8 +191,51 @@ const exercises = [
     'Ejercicios de gemelo, cuádriceps y control de rotación. Progresión según molestias.'],
 ];
 
-const insEx = dbf.prepare('INSERT INTO exercises (name, category, description, technique_tips) VALUES (?,?,?,?)');
-exercises.forEach(([n, cat, d, t]) => insEx.run(n, cat, d, t));
+const insEx = dbf.prepare('INSERT INTO exercises (name, description, technique_tips) VALUES (?,?,?)');
+const exerciseIds = new Map();
+const exerciseCategoryTags = new Map();
+exercises.forEach(([n, cat, d, t]) => {
+  const r = insEx.run(n, d, t);
+  exerciseIds.set(n, Number(r.lastInsertRowid));
+  // Las antiguas categorías pasan a ser etiquetas del ejercicio.
+  if (cat) exerciseCategoryTags.set(n, cat);
+});
+
+// Etiquetas de ejemplo para que el filtro de la biblioteca tenga contenido.
+const exerciseTags = ['Fuerza', 'Tren inferior', 'Tren superior', 'Empuje', 'Tracción', 'Glúteo', 'Core', 'Movilidad'];
+const insTag = dbf.prepare('INSERT OR IGNORE INTO exercise_tags (name) VALUES (?)');
+const tagIds = new Map();
+exerciseTags.forEach((name) => {
+  const r = insTag.run(name);
+  if (r.changes) tagIds.set(name, Number(r.lastInsertRowid));
+  else tagIds.set(name, db.prepare('SELECT id FROM exercise_tags WHERE name = ?').get(name).id);
+});
+const tagAssignments = {
+  'Sentadilla con barra': ['Fuerza', 'Tren inferior'],
+  'Peso muerto rumano': ['Fuerza', 'Tren inferior', 'Glúteo'],
+  'Press de banca': ['Fuerza', 'Tren superior', 'Empuje'],
+  'Press militar': ['Fuerza', 'Tren superior', 'Empuje'],
+  'Remo con barra': ['Fuerza', 'Tren superior', 'Tracción'],
+  'Dominadas': ['Fuerza', 'Tren superior', 'Tracción'],
+  'Fondos en paralelas': ['Fuerza', 'Tren superior', 'Empuje'],
+  'Zancadas con mancuernas': ['Fuerza', 'Tren inferior', 'Glúteo'],
+  'Press de hombro con mancuernas': ['Fuerza', 'Tren superior', 'Empuje'],
+  'Hip thrust': ['Tren inferior', 'Glúteo'],
+  'Plancha': ['Core'],
+  'Mantenimiento de rodilla': ['Movilidad', 'Tren inferior'],
+};
+const insExTag = dbf.prepare('INSERT OR IGNORE INTO exercise_tag_links (exercise_id, tag_id) VALUES (?,?)');
+for (const [name, tags] of Object.entries(tagAssignments)) {
+  const exerciseId = exerciseIds.get(name);
+  if (!exerciseId) continue;
+  for (const tag of tags) insExTag.run(exerciseId, tagIds.get(tag));
+}
+// Cada ejercicio conserva su antigua categoría como etiqueta.
+for (const [name, cat] of exerciseCategoryTags) {
+  const exerciseId = exerciseIds.get(name);
+  const tagId = tagIds.get(cat);
+  if (exerciseId && tagId) insExTag.run(exerciseId, tagId);
+}
 
 // ---------- Bonos configurables ----------
 const insBono = dbf.prepare('INSERT INTO bono_plans (name, price_eur, credits, days_valid, is_active) VALUES (?,?,?,?,1)');

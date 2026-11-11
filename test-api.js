@@ -1,8 +1,13 @@
 'use strict';
 
+// Los tests nunca deben enviar correos reales aunque haya Gmail configurado.
+process.env.MAIL_OUTBOX_ONLY = '1';
+
 const http = require('http');
 const app = require('./server');
 const { db: testDb } = require('./db/db');
+const mailer = require('./services/mailer');
+const { notify } = require('./services/notifications');
 
 const PORT = 3999;
 const BASE = `http://localhost:${PORT}/api`;
@@ -162,9 +167,45 @@ async function main() {
   const logsPg3 = await req('GET', `/trainer/client/${carlos.id}/logs?limit=2&offset=1000`, null, tToken);
   assert(logsPg3.status === 200 && logsPg3.body.logs.length === 0 && logsPg3.body.has_more === false, 'Fin del historial (sin más registros)');
 
+  // etiquetas de la biblioteca (solo entrenador)
+  const tagCreate = await req('POST', '/trainer/exercise-tags', { name: 'Etiqueta test' }, tToken);
+  assert(tagCreate.status === 201 && tagCreate.body.tag.id, 'Crear etiqueta de ejercicio');
+  const testTagId = tagCreate.body.tag.id;
+  const tagDup = await req('POST', '/trainer/exercise-tags', { name: 'etiqueta test' }, tToken);
+  assert(tagDup.status === 409, 'Etiqueta duplicada rechazada');
+  const tagList = await req('GET', '/trainer/exercise-tags', null, tToken);
+  assert(tagList.status === 200 && tagList.body.tags.some((t) => t.id === testTagId), 'La etiqueta aparece en el listado');
+
   // borrado de ejercicio de la biblioteca (solo entrenador)
-  const exCreate = await req('POST', '/trainer/exercises', { name: 'Test a eliminar', category: 'Fuerza' }, tToken);
+  const exCreate = await req('POST', '/trainer/exercises', { name: 'Test a eliminar', tag_ids: [testTagId] }, tToken);
   assert(exCreate.status === 201 && exCreate.body.id, 'Alta de ejercicio de prueba OK');
+  const exTagged = await req('GET', '/trainer/exercises', null, tToken);
+  const tagged = exTagged.body.exercises.find((e) => e.id === exCreate.body.id);
+  assert(tagged && tagged.tags.length === 1 && tagged.tags[0].id === testTagId, 'Ejercicio creado con su etiqueta');
+  const exClient = await req('GET', '/exercises', null, token);
+  const taggedClient = exClient.body.exercises.find((e) => e.id === exCreate.body.id);
+  assert(taggedClient && taggedClient.tags.some((t) => t.id === testTagId), 'El cliente recibe las etiquetas del ejercicio');
+
+  // quitar una etiqueta de un ejercicio concreto no debe afectar a los demás
+  const otherEx = exTagged.body.exercises.find((e) => e.id !== exCreate.body.id);
+  const otherOriginalTags = otherEx.tags.map((t) => t.id);
+  const otherAssign = await req('PUT', `/trainer/exercises/${otherEx.id}`, { tag_ids: [...otherOriginalTags, testTagId] }, tToken);
+  assert(otherAssign.status === 200, 'Asignar la etiqueta a otro ejercicio');
+  const exClearTags = await req('PUT', `/trainer/exercises/${exCreate.body.id}`, { tag_ids: [] }, tToken);
+  assert(exClearTags.status === 200, 'Quitar etiquetas a un ejercicio');
+  const afterClear = await req('GET', '/trainer/exercises', null, tToken);
+  const otherStill = afterClear.body.exercises.find((e) => e.id === otherEx.id);
+  assert(otherStill && otherStill.tags.some((t) => t.id === testTagId), 'Quitar la etiqueta de un ejercicio no afecta a los demás');
+
+  const exReassign = await req('PUT', `/trainer/exercises/${exCreate.body.id}`, { tag_ids: [testTagId] }, tToken);
+  assert(exReassign.status === 200, 'Asignar de nuevo la etiqueta');
+  const tagDel = await req('DELETE', `/trainer/exercise-tags/${testTagId}`, null, tToken);
+  assert(tagDel.status === 200, 'Eliminar etiqueta de ejercicio');
+  const exAfterTagDel = await req('GET', '/trainer/exercises', null, tToken);
+  const untagged = exAfterTagDel.body.exercises.find((e) => e.id === exCreate.body.id);
+  assert(untagged && untagged.tags.length === 0, 'La etiqueta eliminada desaparece de los ejercicios');
+  const otherUntagged = exAfterTagDel.body.exercises.find((e) => e.id === otherEx.id);
+  assert(otherUntagged && !otherUntagged.tags.some((t) => t.id === testTagId), 'Borrar una etiqueta del menú la quita de todos los ejercicios');
   const exDel = await req('DELETE', `/trainer/exercises/${exCreate.body.id}`, null, tToken);
   assert(exDel.status === 200, `Borrar ejercicio OK (${exDel.status})`);
   const exAfter = await req('GET', '/trainer/exercises', null, tToken);
@@ -382,6 +423,10 @@ async function main() {
   assert(bonoDel.status === 200, 'Desactivar bono');
   const bonoGone = await req('POST', '/trainer/packages', { user_id: pedro.id, bono_id: bonoNew.body.bono_plan.id }, tToken);
   assert(bonoGone.status === 400, 'Asignar bono desactivado rechazado');
+  const bonoPermanent = await req('DELETE', `/trainer/bono-plans/${bonoNew.body.bono_plan.id}/permanent`, null, tToken);
+  assert(bonoPermanent.status === 200 && bonoPermanent.body.deleted, 'Eliminar definitivamente un bono desactivado');
+  const bonosAfter = await req('GET', '/trainer/bono-plans', null, tToken);
+  assert(!bonosAfter.body.bono_plans.some((b) => b.id === bonoNew.body.bono_plan.id), 'El bono eliminado desaparece de la lista');
 
   console.log('\n== MODELO DE CRÉDITOS POR BONO (carteras / FIFO / caducidad) ==');
   // desglose global de carteras para el entrenador
@@ -437,6 +482,19 @@ async function main() {
   const notifList = await req('GET', '/notifications', null, newToken);
   assert(notifList.status === 200 && notifList.body.notifications.every((n) => n.kind === 'aviso' || n.kind === 'alerta'), '/notifications clasifica cada fila como alerta o aviso');
 
+  // eliminar definitivamente a un cliente (solo tras darlo de baja)
+  const tmpClientId = register.body.user.id;
+  const delActive = await req('DELETE', `/trainer/client/${tmpClientId}/permanent`, null, tToken);
+  assert(delActive.status === 400, 'No se puede eliminar un cliente activo sin darlo de baja');
+  const deactTmp = await req('POST', `/trainer/client/${tmpClientId}/deactivate`, {}, tToken);
+  assert(deactTmp.status === 200, 'Dar de baja al cliente antes de eliminarlo');
+  const delTmp = await req('DELETE', `/trainer/client/${tmpClientId}/permanent`, null, tToken);
+  assert(delTmp.status === 200 && delTmp.body.deleted, 'Eliminar definitivamente un cliente dado de baja');
+  const tmpLogin = await req('POST', '/auth/login', { email: 'nuevo@demo.com', password: 'demo1234' });
+  assert(tmpLogin.status === 401, 'El cliente eliminado ya no puede iniciar sesión');
+  const clientsAfter = await req('GET', '/trainer/clients?include_inactive=1', null, tToken);
+  assert(!clientsAfter.body.clients.some((c) => c.id === tmpClientId), 'El cliente eliminado desaparece de la lista');
+
   const marta = clientsList.body.clients.find((x) => x.email === 'marta@demo.com');
   assert(marta, 'Marta localizada para pruebas de bonos');
 
@@ -474,6 +532,88 @@ async function main() {
   revalNotif = await req('GET', '/notifications', null, pedroToken);
   assert(revalNotif.body.notifications.filter((n) => n.type === 'revaloracion').length === 1, 'Revaloración: solo una vez por valoración');
 
+  console.log('\n== SEGURIDAD DE CUENTAS: CONTRASEÑAS Y RECUPERACIÓN ==');
+  const fichaPass = await req('GET', `/trainer/client/${carlos.id}`, null, tToken);
+  assert(fichaPass.body.client.password_hash === undefined, 'La ficha del cliente no expone el hash de contraseña');
+
+  mailer.clearOutbox();
+
+  // 1) El entrenador asigna una contraseña nueva: la anterior deja de funcionar.
+  const adminReset = await req('POST', `/trainer/client/${carlos.id}/password`, { password: 'ClaveAdmin1' }, tToken);
+  assert(adminReset.status === 200, `Entrenador reasigna contraseña (${adminReset.status})`);
+  assert(mailer.getOutbox().some((m) => m.to === 'carlos@demo.com' && /contraseña/i.test(m.subject)), 'Se envía email de confirmación al cliente');
+  const oldPw = await req('POST', '/auth/login', { email: 'carlos@demo.com', password: 'demo1234' });
+  assert(oldPw.status === 401, 'La contraseña anterior ya no funciona');
+  const newPw = await req('POST', '/auth/login', { email: 'carlos@demo.com', password: 'ClaveAdmin1' });
+  assert(newPw.status === 200, 'Solo funciona la contraseña asignada');
+  const carlosToken = newPw.body.token;
+
+  // 2) Cambio con contraseña actual (autoservicio).
+  const wrongCurrent = await req('PUT', '/auth/password', { current_password: 'incorrecta', new_password: 'ClavePropia2' }, carlosToken);
+  assert(wrongCurrent.status === 400, 'Cambio rechazado si la contraseña actual no es correcta');
+  const selfChange = await req('PUT', '/auth/password', { current_password: 'ClaveAdmin1', new_password: 'ClavePropia2' }, carlosToken);
+  assert(selfChange.status === 200, `Cambio de contraseña del cliente (${selfChange.status})`);
+  const afterSelfOld = await req('POST', '/auth/login', { email: 'carlos@demo.com', password: 'ClaveAdmin1' });
+  const afterSelfNew = await req('POST', '/auth/login', { email: 'carlos@demo.com', password: 'ClavePropia2' });
+  assert(afterSelfOld.status === 401 && afterSelfNew.status === 200, 'Tras el cambio solo funciona la contraseña nueva');
+
+  // 3) Recuperación por email: token de un solo uso y caducidad.
+  mailer.clearOutbox();
+  const forgot = await req('POST', '/auth/forgot-password', { email: 'carlos@demo.com' });
+  assert(forgot.status === 200 && /Si existe una cuenta/i.test(forgot.body.message), 'Solicitud de recuperación con respuesta genérica');
+  const resetMail = mailer.getOutbox().find((m) => m.to === 'carlos@demo.com' && /recupera/i.test(m.subject));
+  assert(!!resetMail, 'Se envía el correo con el enlace de recuperación');
+  const tokenMatch = resetMail && resetMail.text.match(/reset-password\.html\?token=([a-f0-9]+)/);
+  assert(!!tokenMatch, 'El enlace incluye un token de recuperación');
+  const resetToken = tokenMatch ? tokenMatch[1] : '';
+
+  const resetShort = await req('POST', '/auth/reset-password', { token: resetToken, password: '123' });
+  assert(resetShort.status === 400, 'Contraseña demasiado corta rechazada');
+  const resetOk = await req('POST', '/auth/reset-password', { token: resetToken, password: 'ClaveRecuperada3' });
+  assert(resetOk.status === 200, `Recuperación con token válido (${resetOk.status})`);
+  const reuseToken = await req('POST', '/auth/reset-password', { token: resetToken, password: 'OtraClave4' });
+  assert(reuseToken.status === 400, 'El token solo se puede usar una vez');
+  const beforeReset = await req('POST', '/auth/login', { email: 'carlos@demo.com', password: 'ClavePropia2' });
+  const afterReset = await req('POST', '/auth/login', { email: 'carlos@demo.com', password: 'ClaveRecuperada3' });
+  assert(beforeReset.status === 401 && afterReset.status === 200, 'Tras recuperar la cuenta solo funciona la contraseña nueva');
+
+  // El intento fallido anterior no consumió el token (se validó la contraseña antes).
+  mailer.clearOutbox();
+  await req('POST', '/auth/forgot-password', { email: 'carlos@demo.com' });
+  const resetMail2 = mailer.getOutbox().find((m) => m.to === 'carlos@demo.com');
+  const token2Match = resetMail2 && resetMail2.text.match(/reset-password\.html\?token=([a-f0-9]+)/);
+  const token2 = token2Match ? token2Match[1] : '';
+  const validAfterShort = await req('POST', '/auth/reset-password', { token: token2, password: 'ClaveFinal5' });
+  assert(validAfterShort.status === 200, 'Un intento inválido no inutiliza el enlace de recuperación');
+
+  // 4) Un email desconocido recibe la misma respuesta y no genera correo.
+  mailer.clearOutbox();
+  const forgotUnknown = await req('POST', '/auth/forgot-password', { email: 'nadie@example.com' });
+  assert(forgotUnknown.status === 200 && mailer.getOutbox().length === 0, 'Email desconocido: respuesta genérica sin enviar correo');
+
+  console.log('\n== AVISOS Y ALERTAS POR EMAIL ==');
+  mailer.clearOutbox();
+  await notify(carlos.id, 'Aviso de prueba', 'Este es un aviso de prueba para comprobar el envío por email.', 'info');
+  assert(mailer.getOutbox().some((m) => m.to === 'carlos@demo.com' && /Aviso de prueba/.test(m.subject)), 'Los avisos de la app llegan también por email');
+
+  const prefOff = await req('PUT', '/me', { email_notifications: false }, carlosToken);
+  assert(prefOff.status === 200 && prefOff.body.user.email_notifications === 0, 'El cliente puede desactivar los avisos por email');
+
+  mailer.clearOutbox();
+  await notify(carlos.id, 'Aviso silenciado', 'No debería llegar por email.', 'creditos_bajos');
+  assert(!mailer.getOutbox().some((m) => m.to === 'carlos@demo.com'), 'Con la preferencia desactivada no se envían avisos por email');
+
+  mailer.clearOutbox();
+  const resetWhileOptOut = await req('POST', `/trainer/client/${carlos.id}/password`, { password: 'ClaveFinal6' }, tToken);
+  assert(resetWhileOptOut.status === 200 && mailer.getOutbox().some((m) => m.to === 'carlos@demo.com' && /contraseña ha cambiado/i.test(m.subject)), 'La confirmación de seguridad se envía aunque los avisos estén desactivados');
+
+  mailer.clearOutbox();
+  const forgotMandatory = await req('POST', '/auth/forgot-password', { email: 'carlos@demo.com' });
+  assert(forgotMandatory.status === 200 && mailer.getOutbox().some((m) => m.to === 'carlos@demo.com' && /recupera/i.test(m.subject)), 'La recuperación de cuenta se envía aunque los avisos estén desactivados');
+
+  const prefOn = await req('PUT', '/me', { email_notifications: true }, carlosToken);
+  assert(prefOn.status === 200 && prefOn.body.user.email_notifications === 1, 'El cliente puede reactivar los avisos por email');
+
   console.log('\n== FRONTEND (ficheros estáticos) ==');
   const sreq = (p) => new Promise((resolve) => {
     const r = http.request(`http://localhost:${PORT}${p}`, { method: 'GET' }, (res) => {
@@ -485,6 +625,7 @@ async function main() {
     ['/', 'index.html'], ['/client.html', 'client.html'], ['/trainer.html', 'trainer.html'],
     ['/css/styles.css', 'styles.css'], ['/js/api.js', 'api.js'], ['/js/app-client.js', 'app-client.js'],
     ['/js/app-trainer.js', 'app-trainer.js'],     ['/sw.js', 'sw.js'], ['/manifest.webmanifest', 'manifest'],
+    ['/reset-password.html', 'reset-password.html'],
     ['/icon-192.png', 'icon-192.png'], ['/icon-512.png', 'icon-512.png'], ['/consent.html', 'consent.html'],
   ]) {
     const r = await sreq(p);

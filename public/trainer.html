@@ -49,14 +49,21 @@
       <h2 class="view-title">Ejercicios</h2>
       <p class="muted small">Biblioteca de ejercicios con descripción, claves de técnica y vídeo. Los clientes la ven en su apartado de Ejercicios.</p>
       <div class="card">
-        <h3>Añadir ejercicio</h3>
-        <div class="form-grid-2">
-          <div class="field"><label>Nombre</label><input id="ex-new-name"></div>
-          <div class="field"><label>Categoría</label><input id="ex-new-cat" placeholder="Fuerza"></div>
+        <h3>Etiquetas de ejercicios</h3>
+        <p class="small muted">Crea etiquetas para clasificar la biblioteca. Los clientes podrán buscar y filtrar los ejercicios por ellas.</p>
+        <div class="apply-row">
+          <input id="tag-new-name" maxlength="40" placeholder="Ej. Tren inferior">
+          <button class="btn btn-primary" id="btn-add-tag">Añadir etiqueta</button>
         </div>
-        <div class="field"><label>Enlace del vídeo (YouTube)</label><input id="ex-new-video" placeholder="https://www.youtube.com/watch?v=..."></div>
+        <div id="tag-list" class="chips" style="margin-top:12px;"></div>
+      </div>
+      <div class="card">
+        <h3>Añadir ejercicio</h3>
+        <div class="field"><label>Nombre</label><input id="ex-new-name"></div>
+        <div class="field"><label>Enlace del vídeo (YouTube o Shorts)</label><input id="ex-new-video" placeholder="https://www.youtube.com/watch?v=... o https://youtube.com/shorts/..."></div>
         <div class="field"><label>Descripción</label><textarea id="ex-new-desc"></textarea></div>
         <div class="field"><label>Claves de técnica</label><textarea id="ex-new-tips"></textarea></div>
+        <div class="field"><label>Etiquetas</label><div id="ex-new-tags"></div></div>
         <button class="btn btn-primary" id="btn-add-ex">Guardar ejercicio</button>
       </div>
       <div id="library-list"></div>

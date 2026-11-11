@@ -3,11 +3,13 @@
 const express = require('express');
 const { db, toDateStr, slotStartDateTime, startOfWeek, addDays, addMinutes, createSlot, applyTemplate, getSetting } = require('../db/db');
 const { requireAuth, requireTrainer } = require('../middleware/auth');
-const { ApiError, assignPackage, adjustCredits, cancelSlot, deactivateClient, lazyExpireUserCredits, getWallets, getSettings, updateSettings, getSessionCost } = require('../services/business');
+const { ApiError, assignPackage, adjustCredits, cancelSlot, deactivateClient, deleteClientPermanently, lazyExpireUserCredits, getWallets, getSettings, updateSettings, getSessionCost } = require('../services/business');
 const { generateCompositionReport, generateAssessmentReport } = require('../services/reports');
 const { scoreAssessment } = require('../services/scoring');
 const { notify } = require('../services/notifications');
 const { broadcast, broadcastToUser } = require('../services/events');
+const { listTags, listExercisesWithTags, syncExerciseTags } = require('../services/exercises');
+const { setUserPassword } = require('../services/passwords');
 
 const router = express.Router();
 router.use(requireAuth, requireTrainer);
@@ -398,6 +400,27 @@ router.delete('/bono-plans/:id', (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Eliminar definitivamente un bono configurable (solo si ya está desactivado).
+// Las carteras ya asignadas conservan su etiqueta y créditos, pero pierden el
+// enlace al plan para no dejar referencias huérfanas.
+router.delete('/bono-plans/:id/permanent', (req, res, next) => {
+  try {
+    const existing = db.prepare('SELECT * FROM bono_plans WHERE id = ?').get(Number(req.params.id));
+    if (!existing) throw new ApiError(404, 'Bono no encontrado');
+    if (existing.is_active !== 0) throw new ApiError(400, 'Desactiva el bono antes de eliminarlo');
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare('UPDATE credit_wallets SET bono_plan_id = NULL WHERE bono_plan_id = ?').run(existing.id);
+      db.prepare('DELETE FROM bono_plans WHERE id = ?').run(existing.id);
+      db.exec('COMMIT');
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
+    res.json({ ok: true, deleted: true });
+  } catch (e) { next(e); }
+});
+
 // Carteras de créditos activas de todos los clientes (desglose por bono):
 // cada bono con sus créditos restantes y su fecha de caducidad.
 router.get('/wallets', (req, res, next) => {
@@ -418,6 +441,8 @@ router.get('/client/:id', (req, res, next) => {
     const id = Number(req.params.id);
     const c = db.prepare(`SELECT * FROM users WHERE id = ? AND role = 'client'`).get(id);
     if (!c) throw new ApiError(404, 'Cliente no encontrado');
+    const client = { ...c };
+    delete client.password_hash;
 
     const fresh = lazyExpireUserCredits(id);
     const wallets = getWallets(id);
@@ -459,7 +484,7 @@ router.get('/client/:id', (req, res, next) => {
     ).all(id, today);
 
     res.json({
-      client: c,
+      client,
       credits: { balance: fresh.credits_balance, expires_at: fresh.credits_expires_at },
       wallets,
       nutrition_plan: nutritionPlan,
@@ -942,6 +967,19 @@ router.put('/settings', (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ---------- Asignar una contraseña nueva a un cliente ----------
+// Sustituye el hash: la contraseña anterior deja de funcionar al instante.
+router.post('/client/:id/password', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const client = db.prepare("SELECT id FROM users WHERE id = ? AND role = 'client'").get(id);
+    if (!client) throw new ApiError(404, 'Cliente no encontrado');
+    const body = req.body || {};
+    await setUserPassword(id, body.password ?? body.new_password, { reason: 'trainer' });
+    res.json({ ok: true, message: 'Contraseña actualizada. La anterior ya no funciona.' });
+  } catch (e) { next(e); }
+});
+
 // ---------- Dar de baja / reactivar cliente ----------
 router.post('/client/:id/deactivate', (req, res, next) => {
   try {
@@ -960,6 +998,14 @@ router.post('/client/:id/reactivate', (req, res, next) => {
     db.prepare('UPDATE users SET is_active = 1 WHERE id = ?').run(id);
     notify(id, '¡Tu cuenta está activa de nuevo!', 'Tu entrenador te ha reactivado. ¡Reserva tu próxima clase!', 'info');
     res.json({ message: 'Cliente reactivado' });
+  } catch (e) { next(e); }
+});
+
+// Eliminar definitivamente a un cliente dado de baja (borra cuenta y datos).
+router.delete('/client/:id/permanent', (req, res, next) => {
+  try {
+    const result = deleteClientPermanently(Number(req.params.id));
+    res.json({ message: 'Cliente eliminado definitivamente', ...result });
   } catch (e) { next(e); }
 });
 
@@ -1046,28 +1092,78 @@ router.get('/reports/:id', (req, res, next) => {
 // ---------- Ejercicios (biblioteca) ----------
 router.get('/exercises', (req, res, next) => {
   try {
-    res.json({ exercises: db.prepare('SELECT * FROM exercises ORDER BY category, name').all() });
+    res.json({ exercises: listExercisesWithTags(), tags: listTags() });
+  } catch (e) { next(e); }
+});
+
+// ---------- Etiquetas de ejercicios ----------
+router.get('/exercise-tags', (req, res, next) => {
+  try {
+    res.json({ tags: listTags() });
+  } catch (e) { next(e); }
+});
+
+router.post('/exercise-tags', (req, res, next) => {
+  try {
+    const name = String((req.body && req.body.name) || '').trim();
+    if (!name) throw new ApiError(400, 'El nombre de la etiqueta es obligatorio');
+    if (name.length > 40) throw new ApiError(400, 'La etiqueta no puede superar 40 caracteres');
+    const existing = db.prepare('SELECT id FROM exercise_tags WHERE name = ? COLLATE NOCASE').get(name);
+    if (existing) throw new ApiError(409, 'La etiqueta ya existe');
+    const r = db.prepare('INSERT INTO exercise_tags (name) VALUES (?)').run(name);
+    res.status(201).json({ tag: { id: Number(r.lastInsertRowid), name, exercise_count: 0 } });
+  } catch (e) { next(e); }
+});
+
+router.delete('/exercise-tags/:id', (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const tag = db.prepare('SELECT id FROM exercise_tags WHERE id = ?').get(id);
+    if (!tag) throw new ApiError(404, 'Etiqueta no encontrada');
+    db.prepare('DELETE FROM exercise_tag_links WHERE tag_id = ?').run(id);
+    db.prepare('DELETE FROM exercise_tags WHERE id = ?').run(id);
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
 router.post('/exercises', (req, res, next) => {
   try {
-    const { name, category, description, technique_tips, video_url } = req.body || {};
+    const body = req.body || {};
+    const { name, description, technique_tips, video_url, tag_ids } = body;
     if (!name) throw new ApiError(400, 'name requerido');
-    const r = db.prepare('INSERT INTO exercises (name, category, description, technique_tips, video_url) VALUES (?,?,?,?,?)')
-      .run(name.trim(), category || 'Fuerza', description || null, technique_tips || null, video_url || null);
-    res.status(201).json({ id: Number(r.lastInsertRowid) });
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const r = db.prepare('INSERT INTO exercises (name, description, technique_tips, video_url) VALUES (?,?,?,?)')
+        .run(name.trim(), description || null, technique_tips || null, video_url || null);
+      const id = Number(r.lastInsertRowid);
+      syncExerciseTags(id, tag_ids);
+      db.exec('COMMIT');
+      res.status(201).json({ id });
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
   } catch (e) { next(e); }
 });
 
 router.put('/exercises/:id', (req, res, next) => {
   try {
-    const { name, category, description, technique_tips, video_url } = req.body || {};
+    const body = req.body || {};
+    const { name, description, technique_tips, video_url } = body;
+    const hasTags = Object.prototype.hasOwnProperty.call(body, 'tag_ids');
     const ex = db.prepare('SELECT * FROM exercises WHERE id = ?').get(Number(req.params.id));
     if (!ex) throw new ApiError(404, 'Ejercicio no encontrado');
-    db.prepare('UPDATE exercises SET name=?, category=?, description=?, technique_tips=?, video_url=? WHERE id=?')
-      .run(name ?? ex.name, category ?? ex.category, description ?? ex.description, technique_tips ?? ex.technique_tips, video_url ?? ex.video_url, ex.id);
-    res.json({ ok: true });
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare('UPDATE exercises SET name=?, description=?, technique_tips=?, video_url=? WHERE id=?')
+        .run(name ?? ex.name, description ?? ex.description, technique_tips ?? ex.technique_tips, video_url ?? ex.video_url, ex.id);
+      if (hasTags) syncExerciseTags(ex.id, body.tag_ids);
+      db.exec('COMMIT');
+      res.json({ ok: true });
+    } catch (e) {
+      db.exec('ROLLBACK');
+      throw e;
+    }
   } catch (e) { next(e); }
 });
 

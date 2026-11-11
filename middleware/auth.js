@@ -47,6 +47,7 @@ function publicUser(u) {
     credits_balance: u.credits_balance,
     credits_expires_at: u.credits_expires_at,
     is_active: u.is_active,
+    email_notifications: u.email_notifications === 0 ? 0 : 1,
     created_at: u.created_at,
   };
 }
