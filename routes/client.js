@@ -7,6 +7,7 @@ const { lazyExpireUserCredits, getWallets } = require('../services/business');
 const { ApiError, createBooking, cancelBooking, CANCEL_WINDOW_HOURS, CANCEL_WINDOW_MS, getSessionCost } = require('../services/business');
 const { notificationKind } = require('../services/notifications');
 const { listTags, listExercisesWithTags } = require('../services/exercises');
+const { text, optionalText, int, avatarPhoto } = require('../middleware/validate');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -14,8 +15,28 @@ router.use(requireAuth);
 // ---------- Perfil / plan / reservas ----------
 router.put('/me', (req, res, next) => {
   try {
-    const { full_name, phone, avatar_photo, age, height_cm, sex, sport, active_injuries, email_notifications } = req.body || {};
+    const body = req.body || {};
+    const { email_notifications } = body;
     const me = db.prepare('SELECT * FROM users WHERE id = ?').get(req.userId);
+
+    const fullName = body.full_name === undefined
+      ? me.full_name
+      : text(body.full_name, { max: 120, field: 'El nombre' });
+    if (!fullName) throw new ApiError(400, 'El nombre es obligatorio');
+    const phone = body.phone === undefined ? me.phone : optionalText(body.phone, { max: 40, field: 'El teléfono' });
+    const avatar = body.avatar_photo === undefined ? me.avatar_photo : avatarPhoto(body.avatar_photo);
+    const age = body.age === undefined
+      ? me.age
+      : (body.age === null || body.age === '' ? null : int(body.age, { min: 10, max: 120, field: 'La edad' }));
+    const height = body.height_cm === undefined
+      ? me.height_cm
+      : (body.height_cm === null || body.height_cm === '' ? null : int(body.height_cm, { min: 80, max: 250, field: 'La altura' }));
+    const sex = body.sex === undefined ? me.sex : optionalText(body.sex, { max: 20, field: 'El sexo' });
+    const sport = body.sport === undefined ? me.sport : optionalText(body.sport, { max: 80, field: 'El deporte' });
+    const injuries = body.active_injuries === undefined
+      ? me.active_injuries
+      : optionalText(body.active_injuries, { max: 1000, field: 'Las lesiones' });
+
     let wantsEmail = me.email_notifications === 0 ? 0 : 1;
     if (email_notifications !== undefined) {
       wantsEmail = (email_notifications === true || email_notifications === 1 || email_notifications === '1') ? 1 : 0;
@@ -23,14 +44,14 @@ router.put('/me', (req, res, next) => {
     db.prepare(
       'UPDATE users SET full_name=?, phone=?, avatar_photo=?, age=?, height_cm=?, sex=?, sport=?, active_injuries=?, email_notifications=? WHERE id=?'
     ).run(
-      full_name ?? me.full_name,
-      phone ?? me.phone,
-      avatar_photo ?? me.avatar_photo,
-      age ?? me.age,
-      height_cm ?? me.height_cm,
-      sex ?? me.sex,
-      sport ?? me.sport,
-      active_injuries ?? me.active_injuries,
+      fullName,
+      phone,
+      avatar,
+      age,
+      height,
+      sex,
+      sport,
+      injuries,
       wantsEmail,
       req.userId
     );

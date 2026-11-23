@@ -16,6 +16,7 @@ const T = {
   ficha: null,
   fichaId: null,
   refreshTimer: null,
+  payments: { search: '', date: '', timer: null },
 };
 
 if (!API.getUser() || API.getUser().role !== 'trainer') location.href = '/index.html';
@@ -44,7 +45,7 @@ function stopDayRefresh() { if (T.refreshTimer) { clearInterval(T.refreshTimer);
 function fmtExercises(ex) {
   try {
     const arr = ex ? JSON.parse(ex) : [];
-    return Array.isArray(arr) && arr.length ? arr.map((e) => `<span class="chip chip-sm">${e}</span>`).join('') : '';
+    return Array.isArray(arr) && arr.length ? arr.map((e) => `<span class="chip chip-sm">${esc(e)}</span>`).join('') : '';
   } catch (e) { return ''; }
 }
 
@@ -87,10 +88,27 @@ function normalizeCmju(x) {
 // hace scroll para cargar más y al pulsar uno lo añade como badge removible.
 const PICKER_PAGE = 8;
 
+// Normaliza IDs de cliente vengan como números, strings u objetos {user_id}.
+// Evita que un dato inesperado (null, undefined, NaN) llegue al selector o al
+// cuerpo de la petición y provoque un error al leer .id del elemento siguiente.
+function validClientIds(value) {
+  const raw = Array.isArray(value) ? value : [];
+  const ids = raw.map((x) => Number(x && typeof x === 'object' ? (x.user_id ?? x.id) : x));
+  return Array.from(new Set(ids.filter((n) => Number.isInteger(n) && n > 0)));
+}
+
+function parseClientIds(value) {
+  if (Array.isArray(value)) return validClientIds(value);
+  if (typeof value === 'string' && value.trim()) {
+    try { return validClientIds(JSON.parse(value)); } catch { return []; }
+  }
+  return [];
+}
+
 function mountTargetPicker(containerId, selectedIds) {
   const el = $(containerId);
   if (!el) return;
-  const sel = new Set((Array.isArray(selectedIds) ? selectedIds : []).map(Number));
+  const sel = new Set(validClientIds(selectedIds));
   const state = { q: '', offset: 0, total: null, rows: [], loading: false, cache: new Map() };
   el.innerHTML = `
     <div class="tgt-search">
@@ -107,8 +125,9 @@ function mountTargetPicker(containerId, selectedIds) {
   let watch = null;
 
   function nameOf(id) {
-    const c = state.cache.get(id) || (T.clients || []).find((x) => Number(x.id) === id);
-    return c ? c.full_name : '';
+    const c = state.cache.get(id)
+      || (Array.isArray(T.clients) ? T.clients.find((x) => x && Number(x.id) === id) : null);
+    return c ? (c.full_name || '') : '';
   }
 
   function renderSelected() {
@@ -123,6 +142,7 @@ function mountTargetPicker(containerId, selectedIds) {
   }
 
   function rowHtml(c) {
+    if (!c || !Number.isInteger(Number(c.id)) || Number(c.id) <= 0) return '';
     const id = Number(c.id);
     const isSel = sel.has(id);
     return `<button type="button" class="tgt-row ${isSel ? 'selected' : ''}" data-pick="${id}" ${isSel ? 'disabled' : ''}>
@@ -137,10 +157,16 @@ function mountTargetPicker(containerId, selectedIds) {
       return;
     }
     const hasMore = state.total === null || state.offset < state.total;
-    resultsBox.innerHTML = state.rows.map(rowHtml).join('')
+    resultsBox.innerHTML = state.rows.map(rowHtml).filter(Boolean).join('')
       + (hasMore ? '<div class="tgt-sentinel" data-more></div>' : '');
     resultsBox.querySelectorAll('[data-pick]').forEach((b) => {
-      b.addEventListener('click', () => { sel.add(Number(b.dataset.pick)); renderSelected(); renderResults(); });
+      b.addEventListener('click', () => {
+        const id = Number(b.dataset.pick);
+        if (!Number.isInteger(id) || id <= 0) return;
+        sel.add(id);
+        renderSelected();
+        renderResults();
+      });
     });
     observeSentinel();
   }
@@ -185,10 +211,12 @@ function mountTargetPicker(containerId, selectedIds) {
     resultsBox.classList.add('loading');
     try {
       const data = await API.get('/trainer/clients?limit=' + PICKER_PAGE + '&offset=' + state.offset + '&search=' + encodeURIComponent(state.q));
-      for (const c of data.clients) state.cache.set(Number(c.id), c);
-      state.total = data.total;
-      state.rows = reset ? (data.clients || []) : state.rows.concat(data.clients || []);
-      state.offset += (data.clients || []).length;
+      const rows = (Array.isArray(data.clients) ? data.clients : [])
+        .filter((c) => c && Number.isInteger(Number(c.id)) && Number(c.id) > 0);
+      for (const c of rows) state.cache.set(Number(c.id), c);
+      state.total = Number.isFinite(Number(data.total)) ? Number(data.total) : rows.length;
+      state.rows = reset ? rows : state.rows.concat(rows);
+      state.offset += rows.length;
       renderResults();
     } catch (e) {
       resultsBox.innerHTML = `<div class="tgt-empty">${esc(e.message)}</div>`;
@@ -212,8 +240,12 @@ function mountTargetPicker(containerId, selectedIds) {
   loadMore(false);
 }
 
-function readPickedClients(wrapId) {
-  return Array.from(document.querySelectorAll('#' + wrapId + ' [data-badge]')).map((el) => Number(el.dataset.badge));
+// Lee los badges de un selector concreto. Si hay varios modales abiertos,
+// limitar la búsqueda al contenedor evita mezclar selecciones de otro modal.
+function readPickedClients(wrapId, root = document) {
+  const wrap = root && root.querySelector ? root.querySelector('#' + wrapId) : null;
+  if (!wrap) return [];
+  return validClientIds(Array.from(wrap.querySelectorAll('[data-badge]')).map((el) => el.dataset.badge));
 }
 
 function bindKindToggle(selectId, wrapId) {
@@ -268,7 +300,7 @@ async function loadDayList(silent) {
     if (!data.slots.length) { list.innerHTML = '<p class="muted">No hay franjas para este día.</p>'; return; }
     list.innerHTML = data.slots
       .map((s) => {
-        const theme = s.theme ? `<span class="chip chip-sm chip-theme">${s.theme}</span>` : '';
+        const theme = s.theme ? `<span class="chip chip-sm chip-theme">${esc(s.theme)}</span>` : '';
         const dirChip = s.kind === 'dirigida'
           ? `<span class="chip chip-sm chip-warn">Dirigida ${s.targeted && s.targeted.length ? '· ' + s.targeted.map((x) => esc(x.full_name)).join(', ') : ''}</span>`
           : '';
@@ -296,8 +328,8 @@ async function loadDayList(silent) {
                   return `<div class="attendee">
                     ${avatarHtml({ avatar_photo: b.avatar_photo, full_name: b.full_name }, 38)}
                     <div style="flex:1;min-width:0;cursor:pointer;" data-ficha="${b.user_id}" title="Abrir ficha del cliente">
-                      <div class="a-name">${b.full_name}</div>
-                      ${b.active_injuries ? `<div class="a-injury">⚠ ${b.active_injuries}</div>` : ''}
+                      <div class="a-name">${esc(b.full_name)}</div>
+                      ${b.active_injuries ? `<div class="a-injury">⚠ ${esc(b.active_injuries)}</div>` : ''}
                     </div>
                     ${statusCtl}
                   </div>`;
@@ -492,7 +524,7 @@ function renderTemplateList(templates) {
     const chips = items.length
       ? `<div class="chips">${items
           .map((t) => `<span class="chip ${t.kind === 'dirigida' ? 'chip-warn' : ''}">
-              <b>${t.start_time}–${t.end_time}</b> · ${t.capacity} plazas${t.credit_cost > 1 ? ` · ${t.credit_cost} cr.` : ''}${t.theme ? ` · ${t.theme}` : ''}${t.kind === 'dirigida' ? ' · Dirigida' : ''}
+              <b>${t.start_time}–${t.end_time}</b> · ${t.capacity} plazas${t.credit_cost > 1 ? ` · ${t.credit_cost} cr.` : ''}${t.theme ? ` · ${esc(t.theme)}` : ''}${t.kind === 'dirigida' ? ' · Dirigida' : ''}
               <button data-edit-tpl="${t.id}" title="Editar">✎</button>
               <button data-del-tpl="${t.id}" title="Quitar">×</button>
             </span>`)
@@ -516,9 +548,10 @@ function renderTemplateList(templates) {
 }
 
 function openTemplateModal(tpl) {
-  const ex = tpl.exercises_json ? JSON.parse(tpl.exercises_json) : [];
-  let targetedIds = [];
-  if (tpl.targeted_to) { try { targetedIds = JSON.parse(tpl.targeted_to); } catch { targetedIds = []; } }
+  if (!tpl || !tpl.id) { toast('No se encontró la sesión de la plantilla', 'err'); return; }
+  let ex = [];
+  try { const parsed = tpl.exercises_json ? JSON.parse(tpl.exercises_json) : []; if (Array.isArray(parsed)) ex = parsed; } catch { /* datos antiguos */ }
+  const targetedIds = parseClientIds(tpl.targeted_to);
   const overlay = showModal(`
     <h3>Editar sesión de la plantilla</h3>
     <div class="form-grid-2">
@@ -529,7 +562,7 @@ function openTemplateModal(tpl) {
       <div class="field"><label>Hora fin</label><input id="m-tpl-end" type="time" value="${tpl.end_time}"></div>
       <div class="field"><label>Aforo</label><input id="m-tpl-capacity" type="number" min="1" max="20" value="${tpl.capacity}"></div>
       <div class="field"><label>Coste (créditos)</label><input id="m-tpl-credit" type="number" min="1" max="20" value="${tpl.credit_cost}"></div>
-      <div class="field"><label>Temática</label><input id="m-tpl-theme" value="${tpl.theme || ''}"></div>
+      <div class="field"><label>Temática</label><input id="m-tpl-theme" value="${esc(tpl.theme || '')}"></div>
     </div>
     <div class="form-tgt-row grid-2">
       ${KIND_SELECT_HTML('m-tpl-kind', tpl.kind || 'normal', 'Tipo de sesión')}
@@ -538,7 +571,7 @@ function openTemplateModal(tpl) {
         <div id="m-tpl-tgt"></div>
       </div>
     </div>
-    <div class="field"><label>Ejercicios (separados por coma)</label><input id="m-tpl-exercises" value="${ex.join(', ')}"></div>
+    <div class="field"><label>Ejercicios (separados por coma)</label><input id="m-tpl-exercises" value="${esc(ex.join(', '))}"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" id="m-tpl-cancel">Cancelar</button>
       <button class="btn btn-accent" id="m-tpl-save">Guardar sesión</button>
@@ -559,7 +592,7 @@ function openTemplateModal(tpl) {
         theme: $('m-tpl-theme').value.trim() || null,
         exercises: exercises.length ? exercises : null,
         kind,
-        targeted_to: kind === 'dirigida' ? readPickedClients('m-tpl-tgt') : null,
+        targeted_to: kind === 'dirigida' ? readPickedClients('m-tpl-tgt', overlay) : null,
       });
       toast('Sesión de la plantilla actualizada');
       overlay.remove();
@@ -580,7 +613,7 @@ function renderClassesDay(slots) {
           ? '<span class="badge badge-warn">Llena</span>'
           : `<span class="badge badge-ok">${s.booked}/${s.capacity}</span>`;
       const costChip = s.credit_cost > 1 ? `<span class="chip chip-sm">${s.credit_cost} cr.</span>` : '';
-      const themeChip = s.theme ? `<div class="ts-theme">${s.theme}</div>` : '';
+      const themeChip = s.theme ? `<div class="ts-theme">${esc(s.theme)}</div>` : '';
       const dirChip = s.kind === 'dirigida' ? '<span class="chip chip-sm chip-warn">Dirigida</span>' : '';
       const dirNames = s.targeted && s.targeted.length
         ? `<div class="ts-ex">${s.targeted.map((t) => `<span class="chip chip-sm chip-warn">${esc(t.full_name)}</span>`).join('')}</div>`
@@ -617,8 +650,12 @@ function renderClassesDay(slots) {
 }
 
 function openSlotModal(slotId, slot) {
-  const ex = slot.exercises_json ? JSON.parse(slot.exercises_json) : [];
-  const targetedIds = (slot.targeted && Array.isArray(slot.targeted) ? slot.targeted : []).map((t) => Number(t.user_id));
+  if (!slot || !slot.slot_id) { toast('No se encontró la clase', 'err'); return; }
+  let ex = [];
+  try { const parsed = slot.exercises_json ? JSON.parse(slot.exercises_json) : []; if (Array.isArray(parsed)) ex = parsed; } catch { /* datos antiguos */ }
+  const targetedIds = validClientIds(
+    Array.isArray(slot.targeted) && slot.targeted.length ? slot.targeted : parseClientIds(slot.targeted_to)
+  );
   const overlay = showModal(`
     <h3>Editar clase · ${slot.date} ${slot.start_time}</h3>
     <div class="form-grid-2">
@@ -634,8 +671,8 @@ function openSlotModal(slotId, slot) {
         <div id="m-slot-tgt"></div>
       </div>
     </div>
-    <div class="field"><label>Temática</label><input id="m-slot-theme" value="${slot.theme || ''}"></div>
-    <div class="field"><label>Ejercicios (separados por coma)</label><input id="m-slot-exercises" value="${ex.join(', ')}"></div>
+    <div class="field"><label>Temática</label><input id="m-slot-theme" value="${esc(slot.theme || '')}"></div>
+    <div class="field"><label>Ejercicios (separados por coma)</label><input id="m-slot-exercises" value="${esc(ex.join(', '))}"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" id="m-slot-cancel">Cancelar</button>
       <button class="btn btn-accent" id="m-slot-save">Guardar cambios</button>
@@ -655,7 +692,7 @@ function openSlotModal(slotId, slot) {
         theme: $('m-slot-theme').value.trim() || null,
         exercises: exercises.length ? exercises : null,
         kind,
-        targeted_to: kind === 'dirigida' ? readPickedClients('m-slot-tgt') : null,
+        targeted_to: kind === 'dirigida' ? readPickedClients('m-slot-tgt', overlay) : null,
       });
       toast('Clase actualizada');
       overlay.remove();
@@ -728,7 +765,7 @@ async function renderClientsList(search) {
           ].join('');
           return `<div class="client-pill" data-open="${c.id}" role="button" tabindex="0">
             ${avatarHtml(c, 34)}
-            <span class="client-name"><b>${c.full_name}</b><br><span class="small muted">${c.email}</span></span>
+            <span class="client-name"><b>${esc(c.full_name)}</b><br><span class="small muted">${esc(c.email)}</span></span>
             <span class="client-badges">${credBadge}${badges}</span>
             ${c.is_active ? '' : `<button class="btn btn-sm btn-accent" data-reactivate-client="${c.id}">Reactivar</button>
             <button class="btn btn-sm btn-danger" data-delete-client="${c.id}">Eliminar</button>`}
@@ -793,7 +830,7 @@ function walletRowsHTML(wallets) {
     <tbody>${active
       .map(
         (w) => `<tr>
-          <td>${w.source === 'manual' ? 'Créditos directos del entrenador' : (w.label || w.source)}</td>
+          <td>${w.source === 'manual' ? 'Créditos directos del entrenador' : esc(w.label || w.source)}</td>
           <td><b>${w.credits_remaining}</b></td>
           <td>${w.expires_at ? Dates.fmtExpiry(w.expires_at) : '<span class="muted">sin caducidad</span>'}</td>
         </tr>`
@@ -816,9 +853,9 @@ function renderClientDetail(d) {
       <div class="profile-head" style="margin-bottom:12px;">
         ${avatarHtml(c, 56)}
         <div>
-          <h3 style="margin:0;">${c.full_name}</h3>
-          <p class="muted small" style="margin:2px 0 0;">${c.email}${c.phone ? ' · ' + c.phone : ''}</p>
-          <p class="small muted" style="margin:2px 0 0;">${c.sport || 'Sin deporte'} · ${c.age || '—'} años · ${c.height_cm || '—'} cm</p>
+          <h3 style="margin:0;">${esc(c.full_name)}</h3>
+          <p class="muted small" style="margin:2px 0 0;">${esc(c.email)}${c.phone ? ' · ' + esc(c.phone) : ''}</p>
+          <p class="small muted" style="margin:2px 0 0;">${esc(c.sport || 'Sin deporte')} · ${esc(c.age || '—')} años · ${esc(c.height_cm || '—')} cm</p>
         </div>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${clientBadges(c)}</div>
@@ -869,14 +906,14 @@ function renderClientDetail(d) {
 
       <div class="ficha-section">
         <h3>Notas médicas / lesiones</h3>
-        <div class="field"><label>Lesiones activas</label><textarea id="ficha-injuries">${c.active_injuries || ''}</textarea></div>
-        <div class="field"><label>Notas de entrenamiento</label><textarea id="ficha-notes">${c.notes || ''}</textarea></div>
+        <div class="field"><label>Lesiones activas</label><textarea id="ficha-injuries">${esc(c.active_injuries || '')}</textarea></div>
+        <div class="field"><label>Notas de entrenamiento</label><textarea id="ficha-notes">${esc(c.notes || '')}</textarea></div>
       </div>
 
       <div class="ficha-section">
         <h3>Objetivos y prioridades</h3>
-        <div class="field"><label>Objetivos del cliente</label><textarea id="ficha-objectives" placeholder="Ej. Ganar fuerza en sentadilla, perder 5 kg...">${c.objectives || ''}</textarea></div>
-        <div class="field"><label>Prioridades del cliente</label><textarea id="ficha-priorities" placeholder="Ej. Priorizar movilidad de cadera, evitar sobrecarga lumbar...">${c.priorities || ''}</textarea></div>
+        <div class="field"><label>Objetivos del cliente</label><textarea id="ficha-objectives" placeholder="Ej. Ganar fuerza en sentadilla, perder 5 kg...">${esc(c.objectives || '')}</textarea></div>
+        <div class="field"><label>Prioridades del cliente</label><textarea id="ficha-priorities" placeholder="Ej. Priorizar movilidad de cadera, evitar sobrecarga lumbar...">${esc(c.priorities || '')}</textarea></div>
         <button class="btn btn-sm btn-primary" id="btn-save-notes">Guardar notas</button>
       </div>
     </div>
@@ -952,7 +989,7 @@ function renderClientDetail(d) {
   if (!d.reports.length) repBox.innerHTML = '<p class="muted small">Sin informes generados.</p>';
   else repBox.innerHTML = d.reports
     .map((r) => `<div class="report-item">
-        <div><div class="ri-title">${r.title}</div><div class="ri-sub">${new Date(r.created_at).toLocaleDateString('es-ES')}</div></div>
+        <div><div class="ri-title">${esc(r.title)}</div><div class="ri-sub">${new Date(r.created_at).toLocaleDateString('es-ES')}</div></div>
         <button class="btn btn-sm btn-primary" data-rep="${r.id}">Ver</button>
       </div>`)
     .join('');
@@ -997,7 +1034,7 @@ function renderLogRows(logs, replace) {
   const uniq = logs.filter((l) => { if (seen.has(l.id)) return false; seen.add(l.id); return true; });
   const rows = uniq
     .map((l) => `<tr>
-        <td>${l.exercise}</td>
+        <td>${esc(l.exercise)}</td>
         <td>${l.set_number ?? '—'}</td>
         <td>${l.weight_kg ?? '—'}</td>
         <td>${l.reps ?? '—'}</td>
@@ -1006,7 +1043,7 @@ function renderLogRows(logs, replace) {
         <td>${l.vbt_ms ?? '—'}</td>
         <td>${l.duration_sec ?? '—'}</td>
         <td>${l.rest_sec ?? '—'}</td>
-        <td>${l.tempo ?? '—'}</td>
+        <td>${esc(l.tempo ?? '—')}</td>
         <td>${l.distance_m ?? '—'}</td>
         <td>${l.created_at ? new Date(l.created_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : ''}</td>
         <td><button class="btn btn-sm btn-ghost" data-dellog="${l.id}">×</button></td>
@@ -1144,21 +1181,23 @@ async function saveComposition(userId) {
 
 function openReportWin(title, html) {
   const w = window.open('', '_blank', 'width=900,height=800');
-  w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>${title}</title>
-    <style>@media print{.toolbar{display:none;}} body{font-family:system-ui,Arial,sans-serif;margin:0;background:#f8fafc;}
-    .toolbar{position:sticky;top:0;background:#063DA8;color:#fff;padding:12px 20px;display:flex;align-items:center;gap:12px;}
-    .toolbar button{background:#fff;color:#063DA8;border:none;padding:9px 16px;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit;}
-    .toolbar .t-title{font-weight:800;flex:1;}</style></head><body>
-    <div class="toolbar"><span class="t-title">${title}</span><button onclick="window.print()">Imprimir / Guardar como PDF</button></div>
+  if (!w) return;
+  w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>${esc(title)}</title>
+    <link rel="stylesheet" href="${location.origin}/css/report.css"></head><body>
+    <div class="toolbar"><span class="t-title">${esc(title)}</span><button id="btn-print-report" type="button">Imprimir / Guardar como PDF</button></div>
     ${html}</body></html>`);
   w.document.close();
+  const btn = w.document.getElementById('btn-print-report');
+  if (btn) btn.addEventListener('click', () => w.print());
 }
 
 // ---------- Valoración (asistente 3 pasos) ----------
 function openValoracionMenu(clientId) {
   const client = T.clients.find((c) => c.id === clientId);
   const overlay = showModal(`
-    <h3>Valoración · ${client ? client.full_name : ''}</h3>
+    <h3>Valoración · ${esc(client ? client.full_name : '')}</h3>
     <p class="small muted">Elige el tipo de valoración que quieres realizar.</p>
     <div style="display:flex;flex-direction:column;gap:10px;margin-top:12px;">
       <button class="btn btn-primary btn-lg" id="val-inicial">📋 Valoración inicial</button>
@@ -1276,7 +1315,7 @@ function openAssessmentEditor(clientId, kind) {
   };
 
   const overlay = showModal(`
-    <h3>${isReVal ? 'Revaloración' : 'Valoración inicial'} · ${client ? client.full_name : ''}</h3>
+    <h3>${isReVal ? 'Revaloración' : 'Valoración inicial'} · ${esc(client ? client.full_name : '')}</h3>
     ${isReVal ? '' : `<div class="assess-tabs">
       <button class="assess-tab active" data-step="1">1 · Anamnesis y legal</button>
       <button class="assess-tab" data-step="2">2 · Batería de pruebas</button>
@@ -1555,7 +1594,7 @@ function openAssessmentEditor(clientId, kind) {
     $('pain-chips').innerHTML = A.data.pain_map.length
       ? `<div class="pain-chips">${A.data.pain_map.map((p, i) => `
           <span class="chip chip-pain" style="background:${painColor(p.intensity)};color:#1e293b;">
-            ${p.label}${p.side ? ' (' + p.side + ')' : ''} · EVA ${p.intensity}
+            ${esc(p.label)}${p.side ? ' (' + esc(p.side) + ')' : ''} · EVA ${esc(p.intensity)}
             <button data-pain-del="${i}" style="border:none;background:none;cursor:pointer;color:#1e293b;font-weight:900;">✕</button>
           </span>`).join('')}</div>`
       : '<p class="muted small">Sin zonas de dolor marcadas.</p>';
@@ -1772,7 +1811,7 @@ function openAssessmentEditor(clientId, kind) {
         <div class="adapt-test">
           <h6>Síntomas</h6>
           <div class="adapt-body">
-            <div class="field"><label>Localización</label><input class="adapt-text" data-adapt-path="rodilla.sintomas.localizacion" value="${roda.sintomas.localizacion || ''}" placeholder="Localización del dolor"></div>
+            <div class="field"><label>Localización</label><input class="adapt-text" data-adapt-path="rodilla.sintomas.localizacion" value="${esc(roda.sintomas.localizacion || '')}" placeholder="Localización del dolor"></div>
             <div class="field"><label>Momento</label><select class="adapt-select" data-adapt-path="rodilla.sintomas.momento">
               <option value="">—</option>
               ${['Reposo', 'Deambulación', 'Subir/bajar escaleras', 'Carga', 'Deporte', 'Noche'].map((o) => `<option ${roda.sintomas.momento === o ? 'selected' : ''}>${o}</option>`).join('')}
@@ -1791,7 +1830,7 @@ function openAssessmentEditor(clientId, kind) {
               <div class="field"><label>Flexión I (º)</label><input class="adapt-num" data-adapt-path="rodilla.rom.flex_i" type="number" step="any" value="${roda.rom.flex_i ?? ''}"></div>
               <div class="field"><label>Extensión I (º)</label><input class="adapt-num" data-adapt-path="rodilla.rom.ext_i" type="number" step="any" value="${roda.rom.ext_i ?? ''}"></div>
             </div>
-            <div class="field"><label>Protocolo</label><input class="adapt-text" data-adapt-path="rodilla.rom.protocolo" value="${roda.rom.protocolo || ''}" placeholder="Goniómetro · posición"></div>
+            <div class="field"><label>Protocolo</label><input class="adapt-text" data-adapt-path="rodilla.rom.protocolo" value="${esc(roda.rom.protocolo || '')}" placeholder="Goniómetro · posición"></div>
           </div>
         </div>
 
@@ -1805,7 +1844,7 @@ function openAssessmentEditor(clientId, kind) {
             <div class="form-grid-2">
               <div class="field"><label>Medida sí procede (cm)</label><input class="adapt-num" data-adapt-path="rodilla.derrame.medida" type="number" step="any" value="${roda.derrame.medida ?? ''}"></div>
             </div>
-            <div class="field"><label>Observaciones</label><textarea class="adapt-textarea" data-adapt-path="rodilla.derrame.observaciones" rows="2">${roda.derrame.observaciones || ''}</textarea></div>
+            <div class="field"><label>Observaciones</label><textarea class="adapt-textarea" data-adapt-path="rodilla.derrame.observaciones" rows="2">${esc(roda.derrame.observaciones || '')}</textarea></div>
           </div>
         </div>
 
@@ -1822,7 +1861,7 @@ function openAssessmentEditor(clientId, kind) {
               ${['Profundidad adecuada', 'Control de tronco', 'Control de rodilla (valgo)', 'Simetría', 'Dolor al bajar', 'Dolor al subir'].map((c) => `<label class="check-line" style="font-size:13px;"><input type="checkbox" class="adapt-check" data-adapt-check="rodilla.sentadilla.check.${c}" ${roda.sentadilla.check[c] ? 'checked' : ''}> ${c}</label>`).join('')}
             </div>
             ${aevaHtml('rodilla.sentadilla.sintomas')}
-            <div class="field"><label>Observaciones</label><textarea class="adapt-textarea" data-adapt-path="rodilla.sentadilla.observaciones" rows="2">${roda.sentadilla.observaciones || ''}</textarea></div>
+            <div class="field"><label>Observaciones</label><textarea class="adapt-textarea" data-adapt-path="rodilla.sentadilla.observaciones" rows="2">${esc(roda.sentadilla.observaciones || '')}</textarea></div>
           </div>
         </div>
 
@@ -1862,7 +1901,7 @@ function openAssessmentEditor(clientId, kind) {
         <div class="adapt-test">
           <h6>Síntomas</h6>
           <div class="adapt-body">
-            <div class="field"><label>Localización</label><input class="adapt-text" data-adapt-path="tobillo.sintomas.localizacion" value="${toba.sintomas.localizacion || ''}"></div>
+            <div class="field"><label>Localización</label><input class="adapt-text" data-adapt-path="tobillo.sintomas.localizacion" value="${esc(toba.sintomas.localizacion || '')}"></div>
             <div class="field"><label>Momento</label><select class="adapt-select" data-adapt-path="tobillo.sintomas.momento">
               <option value="">—</option>
               ${['Reposo', 'Deambulación', 'Saltos', 'Deporte', 'Noche'].map((o) => `<option ${toba.sintomas.momento === o ? 'selected' : ''}>${o}</option>`).join('')}
@@ -1894,7 +1933,7 @@ function openAssessmentEditor(clientId, kind) {
               <div class="field"><label>ROM D (º)</label><input class="adapt-num" data-adapt-path="tobillo.rom.deg_d" type="number" step="any" value="${toba.rom.deg_d ?? ''}"></div>
               <div class="field"><label>ROM I (º)</label><input class="adapt-num" data-adapt-path="tobillo.rom.deg_i" type="number" step="any" value="${toba.rom.deg_i ?? ''}"></div>
             </div>
-            <div class="field"><label>Protocolo</label><input class="adapt-text" data-adapt-path="tobillo.rom.protocolo" value="${toba.rom.protocolo || ''}"></div>
+            <div class="field"><label>Protocolo</label><input class="adapt-text" data-adapt-path="tobillo.rom.protocolo" value="${esc(toba.rom.protocolo || '')}"></div>
           </div>
         </div>
 
@@ -1923,7 +1962,7 @@ function openAssessmentEditor(clientId, kind) {
                 </div>
               </div>
             </div>
-            <div class="field"><label>Ritmo / protocolo</label><input class="adapt-text" data-adapt-path="tobillo.heel_rise.ritmo" value="${toba.heel_rise.ritmo || ''}" placeholder="P. ej. 30 reps/min en 1 pierna"></div>
+            <div class="field"><label>Ritmo / protocolo</label><input class="adapt-text" data-adapt-path="tobillo.heel_rise.ritmo" value="${esc(toba.heel_rise.ritmo || '')}" placeholder="P. ej. 30 reps/min en 1 pierna"></div>
             ${aevaHtml('tobillo.heel_rise.sintomas')}
           </div>
         </div>
@@ -1986,7 +2025,7 @@ function openAssessmentEditor(clientId, kind) {
               <div class="field"><label>D</label><input class="adapt-num" data-adapt-path="tobillo.saltos_repetidos.valord" type="number" step="any" value="${toba.saltos_repetidos.valord ?? ''}"></div>
               <div class="field"><label>I</label><input class="adapt-num" data-adapt-path="tobillo.saltos_repetidos.valori" type="number" step="any" value="${toba.saltos_repetidos.valori ?? ''}"></div>
             </div>
-            <div class="field"><label>Protocolo</label><input class="adapt-text" data-adapt-path="tobillo.saltos_repetidos.protocolo" value="${toba.saltos_repetidos.protocolo || ''}"></div>
+            <div class="field"><label>Protocolo</label><input class="adapt-text" data-adapt-path="tobillo.saltos_repetidos.protocolo" value="${esc(toba.saltos_repetidos.protocolo || '')}"></div>
             ${aevaHtml('tobillo.saltos_repetidos.sintomas')}
           </div>
         </div>
@@ -2000,7 +2039,7 @@ function openAssessmentEditor(clientId, kind) {
         <div class="adapt-test">
           <h6>Síntomas</h6>
           <div class="adapt-body">
-            <div class="field"><label>Localización</label><input class="adapt-text" data-adapt-path="hombro.sintomas.localizacion" value="${hoda.sintomas.localizacion || ''}"></div>
+            <div class="field"><label>Localización</label><input class="adapt-text" data-adapt-path="hombro.sintomas.localizacion" value="${esc(hoda.sintomas.localizacion || '')}"></div>
             <div class="field"><label>Momento</label><select class="adapt-select" data-adapt-path="hombro.sintomas.momento">
               <option value="">—</option>
               ${['Reposo', 'Movimientos por encima de la cabeza', 'Rango medio', 'Noche', 'Deporte'].map((o) => `<option ${hoda.sintomas.momento === o ? 'selected' : ''}>${o}</option>`).join('')}
@@ -2020,7 +2059,7 @@ function openAssessmentEditor(clientId, kind) {
               <div class="field"><label>ROM D (º)</label><input class="adapt-num" data-adapt-path="hombro.rom.deg_d" type="number" step="any" value="${hoda.rom.deg_d ?? ''}"></div>
               <div class="field"><label>ROM I (º)</label><input class="adapt-num" data-adapt-path="hombro.rom.deg_i" type="number" step="any" value="${hoda.rom.deg_i ?? ''}"></div>
             </div>
-            <div class="field"><label>Protocolo</label><input class="adapt-text" data-adapt-path="hombro.rom.protocolo" value="${hoda.rom.protocolo || ''}"></div>
+            <div class="field"><label>Protocolo</label><input class="adapt-text" data-adapt-path="hombro.rom.protocolo" value="${esc(hoda.rom.protocolo || '')}"></div>
           </div>
         </div>
 
@@ -2067,7 +2106,7 @@ function openAssessmentEditor(clientId, kind) {
               <span class="adapt-count-val" data-adapt-count-val="hombro.ckcuest.toques">${hoda.ckcuest.toques}</span>
               <button class="btn btn-sm btn-ghost adapt-count-plus" data-adapt-count="hombro.ckcuest.toques">+</button>
             </div>
-            <div class="field"><label>Protocolo</label><input class="adapt-text" data-adapt-path="hombro.ckcuest.protocolo" value="${hoda.ckcuest.protocolo}" placeholder="15 s · manos hombro a hombro"></div>
+            <div class="field"><label>Protocolo</label><input class="adapt-text" data-adapt-path="hombro.ckcuest.protocolo" value="${esc(hoda.ckcuest.protocolo)}" placeholder="15 s · manos hombro a hombro"></div>
             ${aevaHtml('hombro.ckcuest.sintomas')}
           </div>
         </div>
@@ -2080,10 +2119,10 @@ function openAssessmentEditor(clientId, kind) {
               ${['Test de Yocum', 'Test de Neer', 'Test de Kennedy-Hawkins', 'Arm test / modif. adduction', 'Functional test personalizado'].map((o) => `<option ${hoda.funcional.protocolo === o ? 'selected' : ''}>${o}</option>`).join('')}
             </select></div>
             <div class="form-grid-2">
-              <div class="field"><label>Campo 1</label><input class="adapt-text" data-adapt-path="hombro.funcional.campo1" value="${hoda.funcional.campo1 || ''}"></div>
-              <div class="field"><label>Campo 2</label><input class="adapt-text" data-adapt-path="hombro.funcional.campo2" value="${hoda.funcional.campo2 || ''}"></div>
-              <div class="field"><label>Campo 3</label><input class="adapt-text" data-adapt-path="hombro.funcional.campo3" value="${hoda.funcional.campo3 || ''}"></div>
-              <div class="field"><label>Campo 4</label><input class="adapt-text" data-adapt-path="hombro.funcional.campo4" value="${hoda.funcional.campo4 || ''}"></div>
+              <div class="field"><label>Campo 1</label><input class="adapt-text" data-adapt-path="hombro.funcional.campo1" value="${esc(hoda.funcional.campo1 || '')}"></div>
+              <div class="field"><label>Campo 2</label><input class="adapt-text" data-adapt-path="hombro.funcional.campo2" value="${esc(hoda.funcional.campo2 || '')}"></div>
+              <div class="field"><label>Campo 3</label><input class="adapt-text" data-adapt-path="hombro.funcional.campo3" value="${esc(hoda.funcional.campo3 || '')}"></div>
+              <div class="field"><label>Campo 4</label><input class="adapt-text" data-adapt-path="hombro.funcional.campo4" value="${esc(hoda.funcional.campo4 || '')}"></div>
             </div>
             ${aevaHtml('hombro.funcional.sintomas')}
           </div>
@@ -2692,7 +2731,7 @@ function openAssessmentEditor(clientId, kind) {
         <div class="adapt-body">
           <div class="form-grid-2">
             <div class="field"><label>Distancia (m)</label><input class="p-num" data-p-path="sprint.distancia" type="number" step="any" value="${r.sprint.distancia ?? ''}" placeholder="10 / 20 / 30 / 40"></div>
-            <div class="field"><label>Protocolo / posición</label><input class="p-text" data-p-path="sprint.protocolo" value="${r.sprint.protocolo || ''}" placeholder="Salida parado · fotocélulas"></div>
+            <div class="field"><label>Protocolo / posición</label><input class="p-text" data-p-path="sprint.protocolo" value="${esc(r.sprint.protocolo || '')}" placeholder="Salida parado · fotocélulas"></div>
           </div>
           ${pTimerHtml(r, 'sprint.elapsed')}
           <div class="field"><label>O tiempo importado (s)</label><input class="p-num" data-p-path="sprint.tiempo" type="number" step="any" value="${r.sprint.tiempo ?? ''}"></div>
@@ -2703,7 +2742,7 @@ function openAssessmentEditor(clientId, kind) {
         <h6>Cambio de dirección (COD)</h6>
         <div class="adapt-body">
           ${pSideHtml(r, 'rend-cod-side', 'cod.side')}
-          <div class="field"><label>Protocolo</label><input class="p-text" data-p-path="cod.protocolo" value="${r.cod.protocolo || ''}" placeholder="P. ej. 5-0-5 / pro-agility"></div>
+          <div class="field"><label>Protocolo</label><input class="p-text" data-p-path="cod.protocolo" value="${esc(r.cod.protocolo || '')}" placeholder="P. ej. 5-0-5 / pro-agility"></div>
           <div class="p-attempt-side" data-side="d" style="display:none;">
             <div class="attempt-row" style="display:flex;gap:6px;align-items:center;margin-bottom:4px;">
               <span class="small muted" style="width:80px;">Tiempo D (s)</span>
@@ -2729,7 +2768,7 @@ function openAssessmentEditor(clientId, kind) {
         <h6>Dinamometría HHD</h6>
         <div class="adapt-body">
           ${pSideHtml(r, 'rend-hhd-side', 'hhd.side')}
-          <div class="field"><label>Movimiento</label><input class="p-text" data-p-path="hhd.movimiento" value="${r.hhd.movimiento || ''}" placeholder="P. ej. extensión de cuádriceps"></div>
+          <div class="field"><label>Movimiento</label><input class="p-text" data-p-path="hhd.movimiento" value="${esc(r.hhd.movimiento || '')}" placeholder="P. ej. extensión de cuádriceps"></div>
           <div class="unit-toggle" data-p-unit="hhd.unidad">
             <button class="btn btn-sm btn-ghost p-unit${(r.hhd.unidad || 'N') === 'N' ? ' active' : ''}" data-unit="N">N</button>
             <button class="btn btn-sm btn-ghost p-unit${(r.hhd.unidad || 'N') === 'kgf' ? ' active' : ''}" data-unit="kgf">kgf</button>
@@ -2897,8 +2936,8 @@ function openAssessmentEditor(clientId, kind) {
             </div>
           </div>
           <div class="form-grid-2">
-            <div class="field"><label>Ritmo</label><input class="p-text" data-p-path="heel_rise.ritmo" value="${a.heel_rise.ritmo || ''}" placeholder="P. ej. 1 rep/s"></div>
-            <div class="field"><label>Protocolo</label><input class="p-text" data-p-path="heel_rise.protocolo" value="${a.heel_rise.protocolo || ''}" placeholder="P. ej. apoyo unipodal"></div>
+            <div class="field"><label>Ritmo</label><input class="p-text" data-p-path="heel_rise.ritmo" value="${esc(a.heel_rise.ritmo || '')}" placeholder="P. ej. 1 rep/s"></div>
+            <div class="field"><label>Protocolo</label><input class="p-text" data-p-path="heel_rise.protocolo" value="${esc(a.heel_rise.protocolo || '')}" placeholder="P. ej. apoyo unipodal"></div>
           </div>
           ${pEvaHtml(a, 'heel_rise.sintomas')}
         </div>
@@ -3339,7 +3378,7 @@ function openAssessmentEditor(clientId, kind) {
           ${sentParams.map((p) => {
             const sel = CJ_SENT[p.key];
             return `<div style="display:flex;align-items:center;gap:8px;">
-              <span style="width:200px;font-size:13px;flex-shrink:0;">${p.label}</span>
+              <span style="width:200px;font-size:13px;flex-shrink:0;">${esc(p.label)}</span>
               <div class="sent-checklist" data-param="${p.key}" style="display:flex;gap:4px;">
                 ${sentOpts.map((o, i) => `<button type="button" class="btn btn-sm btn-ghost sent-opt${sel === i ? ' active' : ''}" data-val="${i}">${o}</button>`).join('')}
               </div>
@@ -3352,7 +3391,7 @@ function openAssessmentEditor(clientId, kind) {
           </div>
           <div class="field">
             <label>Observaciones</label>
-            <textarea class="sent-observaciones" rows="2" placeholder="Notas de la sentadilla observacional...">${CJ_SENT.observaciones || ''}</textarea>
+            <textarea class="sent-observaciones" rows="2" placeholder="Notas de la sentadilla observacional...">${esc(CJ_SENT.observaciones || '')}</textarea>
           </div>
         </div>
 
@@ -3578,7 +3617,7 @@ function openAssessmentEditor(clientId, kind) {
 
       <div class="assess-section">
         <h4>Notas del entrenador</h4>
-        <div class="field"><textarea id="assess-notes" placeholder="Observaciones, contraindicaciones, pautas...">${A.data.notes || ''}</textarea></div>
+        <div class="field"><textarea id="assess-notes" placeholder="Observaciones, contraindicaciones, pautas...">${esc(A.data.notes || '')}</textarea></div>
       </div>`;
 
     overlay.querySelector('#assess-notes').addEventListener('input', (e) => { A.data.notes = e.target.value; });
@@ -3877,7 +3916,7 @@ function openAssessmentEditor(clientId, kind) {
       </div>
       <div class="assess-section">
         <h4>Notas y observaciones finales</h4>
-        <div class="field"><textarea id="assess-notes-final" placeholder="Redacta las pautas para el informe del cliente...">${A.data.notes || ''}</textarea></div>
+        <div class="field"><textarea id="assess-notes-final" placeholder="Redacta las pautas para el informe del cliente...">${esc(A.data.notes || '')}</textarea></div>
       </div>`;
     overlay.querySelector('#assess-notes-final').addEventListener('input', (e) => { A.data.notes = e.target.value; });
     requestAnimationFrame(() => {
@@ -4004,7 +4043,7 @@ async function openWellnessViewer(clientId) {
       : '<p class="muted small">Este cliente aún no ha respondido ningún cuestionario wellness.</p>';
 
     const overlay = showModal(`
-      <h3>Wellness · ${client.full_name}</h3>
+      <h3>Wellness · ${esc(client.full_name)}</h3>
       <p class="muted small">Cuestionario diario del cliente.</p>
       ${sleepStats ? `<div style="margin-bottom:12px;">${sleepStats}</div>` : ''}
       ${statsHtml}
@@ -4022,7 +4061,7 @@ function openTrainingEditor(clientId) {
   let E = { clientId, name: '', notes: '', exercises: [] };
 
   const overlay = showModal(`
-    <h3>Plan de entrenamiento · ${client ? client.full_name : ''}</h3>
+    <h3>Plan de entrenamiento · ${esc(client ? client.full_name : '')}</h3>
     <div class="form-grid-2">
       <div class="field"><label>Nombre del plan</label><input id="tp-name" placeholder="Ej. Fuerza A / B"></div>
       <div class="field"><label>Notas</label><input id="tp-notes" placeholder="Opcional"></div>
@@ -4055,17 +4094,17 @@ function openTrainingEditor(clientId) {
       <div class="tp-row-top">
         <select data-f="exercise_id">
           <option value="">— Elige ejercicio —</option>
-          ${T.exercises.map((e) => `<option value="${e.id}" ${Number(ex.exercise_id) === e.id ? 'selected' : ''}>${e.name}</option>`).join('')}
+          ${T.exercises.map((e) => `<option value="${e.id}" ${Number(ex.exercise_id) === e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}
         </select>
         <select data-f="day_of_week">${dayOptions(ex.day_of_week)}</select>
         <button class="btn btn-sm btn-ghost" data-del-tp="${ex._k}">×</button>
       </div>
       <div class="tp-row-mid">
         <input data-f="sets" type="number" min="1" placeholder="Series" value="${ex.sets ?? ''}">
-        <input data-f="reps" placeholder="Reps (ej. 8-12)" value="${ex.reps ?? ''}">
+        <input data-f="reps" placeholder="Reps (ej. 8-12)" value="${esc(ex.reps ?? '')}">
         <input data-f="rest_sec" type="number" min="0" placeholder="Descanso (s)" value="${ex.rest_sec ?? ''}">
       </div>
-      <input data-f="notes" placeholder="Nota (ej. cuidado rodilla)" value="${ex.notes || ''}">
+      <input data-f="notes" placeholder="Nota (ej. cuidado rodilla)" value="${esc(ex.notes || '')}">
     </div>`;
   }
 
@@ -4134,12 +4173,12 @@ function openTrainingEditor(clientId) {
 function openAssignBono(clientId) {
   const client = T.clients.find((c) => c.id === clientId);
   const overlay = showModal(`
-    <h3>Asignar bono · ${client ? client.full_name : ''}</h3>
+    <h3>Asignar bono · ${esc(client ? client.full_name : '')}</h3>
     <p class="small muted">El cliente te ha pagado → se le suman los créditos del bono.</p>
     <div class="field"><label>Bono</label>
       <select id="bono-select">${T.bonoPlans
         .filter((b) => b.is_active)
-        .map((b) => `<option value="${b.id}">${b.name} · ${b.price_eur} € → ${b.credits} créd. · ${b.days_valid} días</option>`)
+        .map((b) => `<option value="${b.id}">${esc(b.name)} · ${b.price_eur} € → ${b.credits} créd. · ${b.days_valid} días</option>`)
         .join('')}</select>
     </div>
     <div class="field"><label>Método de pago</label>
@@ -4173,8 +4212,8 @@ function openClientPasswordModal(client) {
   const overlay = showModal(`
     <h3>Cambiar contraseña · ${client ? esc(client.full_name) : ''}</h3>
     <p class="small muted">La contraseña anterior dejará de funcionar inmediatamente. El cliente recibirá un correo de confirmación.</p>
-    <div class="field"><label>Nueva contraseña (mín. 6)</label><input id="cpw-new" type="password" minlength="6" autocomplete="new-password"></div>
-    <div class="field"><label>Repetir contraseña</label><input id="cpw-repeat" type="password" minlength="6" autocomplete="new-password"></div>
+    <div class="field"><label>Nueva contraseña (mín. 8)</label><input id="cpw-new" type="password" minlength="8" autocomplete="new-password"></div>
+    <div class="field"><label>Repetir contraseña</label><input id="cpw-repeat" type="password" minlength="8" autocomplete="new-password"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" id="cpw-cancel">Cancelar</button>
       <button class="btn btn-primary" id="cpw-save">Asignar contraseña</button>
@@ -4201,7 +4240,7 @@ function openClientPasswordModal(client) {
 function openAdjustCredits(clientId) {
   const client = T.clients.find((c) => c.id === clientId);
   const overlay = showModal(`
-    <h3>Ajustar créditos · ${client ? client.full_name : ''}</h3>
+    <h3>Ajustar créditos · ${esc(client ? client.full_name : '')}</h3>
     <p class="small muted">Saldo actual: <b>${client ? client.credits_balance : 0}</b> créditos. Los créditos que añadas aquí <b>no caducan</b>; los de los bonos caducan en su fecha.</p>
     <div class="form-grid-2">
       <div class="field"><label>Cantidad</label><input id="cred-num" type="number" min="1" value="1"></div>
@@ -4235,7 +4274,7 @@ function openAdjustCredits(clientId) {
 async function openPaymentsModal(clientId) {
   const client = T.clients.find((c) => c.id === clientId);
   const overlay = showModal(`
-    <h3>Historial de pagos · ${client ? client.full_name : ''}</h3>
+    <h3>Historial de pagos · ${esc(client ? client.full_name : '')}</h3>
     <p class="small muted">Bonos y pagos registrados de este cliente.</p>
     <div id="payments-body"><p class="muted">Cargando…</p></div>
     <div class="modal-actions"><button class="btn btn-ghost" id="payments-close">Cerrar</button></div>`);
@@ -4247,7 +4286,7 @@ async function openPaymentsModal(clientId) {
       ? `<table class="log-table">
           <thead><tr><th>Plan</th><th>Créditos</th><th>Pago</th><th>Importe</th><th>Fecha</th><th>Validez</th></tr></thead>
           <tbody>${d.payments
-            .map((p) => `<tr><td>${p.plan}</td><td>+${p.credits_granted}</td><td>${p.payment_method === 'tarjeta' ? 'Tarjeta' : 'Efectivo'}</td><td>${p.amount_eur} €</td><td>${new Date(p.created_at).toLocaleDateString('es-ES')}</td><td>${p.expires_at ? new Date(p.expires_at).toLocaleDateString('es-ES') : '—'}</td></tr>`)
+            .map((p) => `<tr><td>${esc(p.plan)}</td><td>+${p.credits_granted}</td><td>${p.payment_method === 'tarjeta' ? 'Tarjeta' : 'Efectivo'}</td><td>${p.amount_eur} €</td><td>${new Date(p.created_at).toLocaleDateString('es-ES')}</td><td>${p.expires_at ? new Date(p.expires_at).toLocaleDateString('es-ES') : '—'}</td></tr>`)
             .join('')}</tbody>
         </table>`
       : '<p class="muted">Sin pagos registrados para este cliente.</p>';
@@ -4435,7 +4474,7 @@ function renderTagManager() {
     const tag = T.exerciseTags.find((t) => t.id === Number(b.dataset.delTag));
     const ok = await confirmDialog(
       'Eliminar etiqueta',
-      `¿Eliminar la etiqueta ${tag ? `<b>${esc(tag.name)}</b>` : ''}? Se quitará de todos los ejercicios que la tengan. Esta acción no se puede deshacer.`,
+      `¿Eliminar la etiqueta ${tag ? tag.name : ''}? Se quitará de todos los ejercicios que la tengan. Esta acción no se puede deshacer.`,
       'Eliminar'
     );
     if (!ok) return;
@@ -4544,6 +4583,88 @@ async function loadLibrary() {
 // ============================================================
 // BONOS Y CRÉDITOS
 // ============================================================
+// Selector desplegable con buscador: se usa para elegir cliente y bono al
+// asignar un bono. El valor elegido queda en un input hidden para no cambiar
+// el resto del flujo de guardado.
+function searchSelectHtml({ hiddenId, inputId, listId, placeholder }) {
+  return `<div class="cb search-select">
+    <input type="hidden" id="${hiddenId}">
+    <input type="search" id="${inputId}" class="cb-input" placeholder="${esc(placeholder)}" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="${listId}" aria-autocomplete="list">
+    <ul id="${listId}" class="cb-list" role="listbox" hidden></ul>
+  </div>`;
+}
+
+function mountSearchSelect({ hiddenId, inputId, listId, items, getLabel, getMeta, getSearchText, onChange }) {
+  const hidden = $(hiddenId);
+  const input = $(inputId);
+  const list = $(listId);
+  let selected = null;
+
+  const close = () => {
+    list.hidden = true;
+    input.setAttribute('aria-expanded', 'false');
+  };
+
+  const pick = (item) => {
+    selected = item;
+    hidden.value = String(item.id);
+    input.value = getLabel(item);
+    close();
+    if (onChange) onChange(item);
+  };
+
+  const render = (queryText = '') => {
+    const query = String(queryText || '').trim().toLowerCase();
+    const matches = items.filter((item) => {
+      if (!query) return true;
+      const haystack = String((getSearchText ? getSearchText(item) : getLabel(item)) || '').toLowerCase();
+      return haystack.includes(query);
+    });
+    list.innerHTML = matches.length
+      ? matches.slice(0, 60).map((item, i) => `<li role="option" tabindex="-1" data-idx="${i}">
+          <span class="cb-name">${esc(getLabel(item))}</span>
+          ${getMeta ? `<span class="cb-cat">${esc(getMeta(item))}</span>` : ''}
+        </li>`).join('')
+      : '<li class="cb-empty">Sin resultados</li>';
+    list.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+    list.querySelectorAll('[data-idx]').forEach((li) => {
+      li.addEventListener('click', () => pick(matches[Number(li.dataset.idx)]));
+    });
+  };
+
+  input.addEventListener('focus', () => {
+    input.select();
+    render('');
+  });
+  input.addEventListener('input', () => {
+    const wasSelected = selected;
+    if (selected && input.value !== getLabel(selected)) selected = null;
+    if (!selected) hidden.value = '';
+    render(input.value);
+    if (wasSelected && !selected && onChange) onChange(null);
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { close(); return; }
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const first = list.querySelector('[data-idx]');
+    if (first) first.click();
+  });
+}
+
+// Nombre visible de una cartera: los créditos manuales del entrenador o el
+// nombre del bono vendido. Si el bono se borró, se usa la etiqueta histórica.
+function walletDisplayName(w) {
+  if (w.source === 'manual') return 'Créditos directos del entrenador';
+  if (w.bono_name) return w.bono_name;
+  // Carteras antiguas sin bono_plan_id: la etiqueta guardada es
+  // "Pago <nombre> <precio> €". Se quita el prefijo y el precio para que el
+  // filtro muestre el mismo nombre que un bono actual.
+  const label = String(w.label || '').replace(/^Pago\s+/i, '').trim();
+  return label.replace(/\s+\d+(?:[.,]\d+)?\s*€$/, '') || label || 'Bono';
+}
+
 async function loadBonos() {
   try {
     if (!T.clients.length) { const d = await API.get('/trainer/clients'); T.clients = d.clients; }
@@ -4575,8 +4696,8 @@ async function loadBonos() {
         <h3>Asignar bono a un cliente</h3>
         <p class="small muted">El cliente paga → se le suman los créditos del bono.</p>
         <div class="apply-row">
-          <select id="asg-client">${T.clients.map((c) => `<option value="${c.id}">${c.full_name} (${c.credits_balance} cr.)</option>`).join('')}</select>
-          <select id="asg-bono">${T.bonoPlans.filter((b) => b.is_active).map((b) => `<option value="${b.id}">${b.name} · ${b.price_eur} € → ${b.credits}</option>`).join('')}</select>
+          ${searchSelectHtml({ hiddenId: 'asg-client', inputId: 'asg-client-search', listId: 'asg-client-list', placeholder: 'Buscar cliente por nombre…' })}
+          ${searchSelectHtml({ hiddenId: 'asg-bono', inputId: 'asg-bono-search', listId: 'asg-bono-list', placeholder: 'Buscar bono por nombre…' })}
           <select id="asg-method">
             <option value="efectivo">Efectivo</option>
             <option value="tarjeta">Tarjeta</option>
@@ -4588,10 +4709,39 @@ async function loadBonos() {
       <div class="card">
         <h3>Créditos activos por bono</h3>
         <p class="small muted">Desglose de cada bono vendido: créditos restantes y fecha de caducidad. Los créditos directos del entrenador no caducan.</p>
+        <div class="wallet-tools">
+          <div class="field">
+            <label>Buscar cliente</label>
+            <input id="wallet-search" type="search" placeholder="Nombre del cliente…" autocomplete="off">
+          </div>
+          <div class="field">
+            <label>Filtrar por bono activo</label>
+            ${searchSelectHtml({ hiddenId: 'wallet-bono-value', inputId: 'wallet-bono-filter', listId: 'wallet-bono-list', placeholder: 'Todos los bonos' })}
+          </div>
+        </div>
         <div id="bonos-wallets"><p class="muted">Cargando…</p></div>
       </div>`;
 
     renderBonoList();
+    mountSearchSelect({
+      hiddenId: 'asg-client',
+      inputId: 'asg-client-search',
+      listId: 'asg-client-list',
+      items: T.clients,
+      getLabel: (c) => c.full_name || ('Cliente #' + c.id),
+      getMeta: (c) => `${c.credits_balance} cr.`,
+      getSearchText: (c) => `${c.full_name || ''} ${c.email || ''}`,
+    });
+    const activeBonos = T.bonoPlans.filter((b) => b.is_active);
+    mountSearchSelect({
+      hiddenId: 'asg-bono',
+      inputId: 'asg-bono-search',
+      listId: 'asg-bono-list',
+      items: activeBonos,
+      getLabel: (b) => b.name,
+      getMeta: (b) => `${b.price_eur} € → ${b.credits} créd. · ${b.days_valid} días`,
+      getSearchText: (b) => b.name,
+    });
     $('btn-save-cost').addEventListener('click', async () => {
       try {
         const v = Number($('set-cost').value);
@@ -4616,29 +4766,61 @@ async function loadBonos() {
       } catch (e) { toast(e.message, 'err'); }
     });
 
-    // desglose de créditos activos por bono (agrupado por cliente)
+    // desglose de créditos activos por bono (agrupado por cliente, con filtros)
     try {
       const wres = await API.get('/trainer/wallets');
-      const byUser = {};
-      for (const w of wres.wallets) (byUser[w.user_id] = byUser[w.user_id] || []).push(w);
-      const names = Object.fromEntries((wres.wallets || []).map((w) => [w.user_id, w.full_name]));
+      const wallets = wres.wallets || [];
       const boxW = $('bonos-wallets');
-      const entries = Object.entries(byUser);
-      const wrows = (list) => list
-        .map((w) => `<tr>
-          <td>${w.source === 'manual' ? 'Créditos directos del entrenador' : (w.label || w.source)}</td>
-          <td><b>${w.credits_remaining}</b></td>
-          <td>${w.expires_at ? Dates.fmtExpiry(w.expires_at) : '<span class="muted">sin caducidad</span>'}</td>
-        </tr>`)
-        .join('');
-      boxW.innerHTML = entries.length
-        ? entries
-            .map(([uid, list]) => `<div style="margin-bottom:12px;">
-                <div class="small muted" style="margin-bottom:4px;"><b>${names[uid] || 'Cliente ' + uid}</b> · ${list.reduce((s, w) => s + w.credits_remaining, 0)} créditos totales</div>
-                <table class="log-table"><tbody>${wrows(list)}</tbody></table>
-              </div>`)
-            .join('')
-        : '<p class="muted small">No hay créditos activos vendidos.</p>';
+      const labels = [...new Set(wallets.map(walletDisplayName))].sort((a, b) => a.localeCompare(b, 'es'));
+
+      const draw = () => {
+        const q = $('wallet-search').value.trim().toLowerCase();
+        const bonoName = $('wallet-bono-value').value;
+        const filtered = wallets.filter((w) => {
+          if (q && !(w.full_name || '').toLowerCase().includes(q)) return false;
+          if (bonoName && walletDisplayName(w) !== bonoName) return false;
+          return true;
+        });
+
+        if (!filtered.length) {
+          boxW.innerHTML = `<p class="muted small">${wallets.length
+            ? 'No hay créditos activos que coincidan con los filtros.'
+            : 'No hay créditos activos vendidos.'}</p>`;
+          return;
+        }
+
+        const byUser = new Map();
+        for (const w of filtered) {
+          if (!byUser.has(w.user_id)) byUser.set(w.user_id, []);
+          byUser.get(w.user_id).push(w);
+        }
+        const entries = [...byUser.entries()]
+          .sort((a, b) => (a[1][0].full_name || '').localeCompare(b[1][0].full_name || '', 'es'));
+
+        boxW.innerHTML = entries.map(([uid, list]) => {
+          const total = list.reduce((s, w) => s + w.credits_remaining, 0);
+          const rows = list.map((w) => `<tr>
+            <td>${esc(walletDisplayName(w))}</td>
+            <td><b>${w.credits_remaining}</b></td>
+            <td>${w.expires_at ? Dates.fmtExpiry(w.expires_at) : '<span class="muted">sin caducidad</span>'}</td>
+          </tr>`).join('');
+          return `<div style="margin-bottom:12px;">
+            <div class="small muted" style="margin-bottom:4px;"><b>${esc(list[0].full_name || 'Cliente ' + uid)}</b> · ${total} créditos totales</div>
+            <table class="log-table"><tbody>${rows}</tbody></table>
+          </div>`;
+        }).join('');
+      };
+
+      mountSearchSelect({
+        hiddenId: 'wallet-bono-value',
+        inputId: 'wallet-bono-filter',
+        listId: 'wallet-bono-list',
+        items: [{ id: '', label: 'Todos los bonos' }, ...labels.map((name) => ({ id: name, label: name }))],
+        getLabel: (item) => item.label,
+        onChange: draw,
+      });
+      $('wallet-search').addEventListener('input', draw);
+      draw();
     } catch (e) { toast(e.message, 'err'); }
   } catch (e) { toast(e.message, 'err'); }
 }
@@ -4654,10 +4836,10 @@ async function loadFacturacion() {
     const box = $('facturacion-area');
     box.innerHTML = `
       <div class="insight-grid" style="margin-bottom:16px;">
-        <div class="insight"><div class="i-num">${ov.revenue_month} €</div><div class="i-lbl">Ingresos este mes</div></div>
-        <div class="insight"><div class="i-num">${ov.active_credits}</div><div class="i-lbl">Créditos activos</div></div>
-        <div class="insight"><div class="i-num">${ov.expiring_soon_count}</div><div class="i-lbl">Caducan en ≤2 días</div></div>
-        <div class="insight"><div class="i-num">${ov.active_clients}</div><div class="i-lbl">Clientes activos</div></div>
+        <div class="insight"><div class="i-num" id="fact-revenue">${ov.revenue_month} €</div><div class="i-lbl">Ingresos este mes</div></div>
+        <div class="insight"><div class="i-num" id="fact-credits">${ov.active_credits}</div><div class="i-lbl">Créditos activos</div></div>
+        <div class="insight"><div class="i-num" id="fact-expiring">${ov.expiring_soon_count}</div><div class="i-lbl">Caducan en ≤2 días</div></div>
+        <div class="insight"><div class="i-num" id="fact-active-clients">${ov.active_clients}</div><div class="i-lbl">Clientes activos</div></div>
       </div>
 
       <div class="facturacion-grid">
@@ -4668,13 +4850,67 @@ async function loadFacturacion() {
         </div>
         <div class="card">
           <h3>Últimos pagos</h3>
-          <div id="fact-recent-packages"></div>
+          <p class="small muted">Hasta 20 pagos, de más reciente a más antiguo. Eliminar un pago solo lo quita de la facturación: no afecta a los bonos ni a los créditos del cliente.</p>
+          <div id="fact-payments-filters"></div>
+          <div id="fact-recent-packages"><p class="muted">Cargando…</p></div>
         </div>
       </div>`;
 
     renderProfileDonut(ov);
-    renderPaymentsTable($('fact-recent-packages'), ov.recent_packages);
+    renderPaymentsFilters();
+    await loadPayments();
   } catch (e) { toast(e.message, 'err'); }
+}
+
+function renderPaymentsFilters() {
+  const box = $('fact-payments-filters');
+  if (!box) return;
+  box.innerHTML = `
+    <div class="payments-filters">
+      <div class="field"><label for="pay-search">Buscar cliente</label>
+        <input id="pay-search" type="search" placeholder="Nombre del cliente…" autocomplete="off" spellcheck="false" value="${esc(T.payments.search)}"></div>
+      <div class="field"><label for="pay-date">Fecha del pago</label>
+        <input id="pay-date" type="date" value="${esc(T.payments.date)}"></div>
+    </div>`;
+  const search = box.querySelector('#pay-search');
+  const date = box.querySelector('#pay-date');
+  search.addEventListener('input', () => {
+    clearTimeout(T.payments.timer);
+    T.payments.search = search.value.trim();
+    T.payments.timer = setTimeout(loadPayments, 220);
+  });
+  date.addEventListener('change', () => { T.payments.date = date.value; loadPayments(); });
+}
+
+async function loadPayments() {
+  const box = $('fact-recent-packages');
+  if (!box) return;
+  const qs = new URLSearchParams({ limit: '20' });
+  if (T.payments.search) qs.set('search', T.payments.search);
+  if (T.payments.date) qs.set('date', T.payments.date);
+  try {
+    const data = await API.get('/trainer/payments?' + qs.toString());
+    renderPaymentsTable(box, data.payments);
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function refreshFacturacionMetrics() {
+  try {
+    const ov = await API.get('/trainer/overview');
+    const set = (id, value) => { const node = $(id); if (node) node.textContent = value; };
+    set('fact-revenue', ov.revenue_month + ' €');
+    set('fact-credits', ov.active_credits);
+    set('fact-expiring', ov.expiring_soon_count);
+    set('fact-active-clients', ov.active_clients);
+    renderProfileDonut(ov);
+  } catch { /* se conservan los últimos valores visibles */ }
+}
+
+function paymentDateLabel(value) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(String(value || ''));
+  if (m) return `${m[3]}/${m[2]}/${m[1]} · ${m[4]}:${m[5]}`;
+  const d = new Date(String(value || ''));
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('es-ES');
 }
 
 function renderProfileDonut(ov) {
@@ -4730,14 +4966,44 @@ function renderProfileDonut(ov) {
 }
 
 function renderPaymentsTable(el, packages) {
-  el.innerHTML = packages.length
-    ? `<table class="log-table">
-        <thead><tr><th>Cliente</th><th>Plan</th><th>Créditos</th><th>Pago</th><th>Importe</th><th>Fecha</th></tr></thead>
-        <tbody>${packages
-          .map((p) => `<tr><td>${p.full_name}</td><td>${p.plan}</td><td>+${p.credits_granted}</td><td>${p.payment_method === 'tarjeta' ? 'Tarjeta' : 'Efectivo'}</td><td>${p.amount_eur} €</td><td>${new Date(p.created_at).toLocaleDateString('es-ES')}</td></tr>`)
-          .join('')}</tbody>
-      </table>`
-    : '<p class="muted">Sin pagos registrados.</p>';
+  if (!el) return;
+  const rows = Array.isArray(packages) ? packages : [];
+  if (!rows.length) {
+    el.innerHTML = '<p class="muted">Sin pagos para los filtros seleccionados.</p>';
+    return;
+  }
+  el.innerHTML = `<div class="payments-list" role="list">${rows
+    .map((p) => {
+      const id = Number(p.id);
+      const client = p.full_name || 'Cliente';
+      return `<div class="payment-item" role="listitem">
+        <div class="payment-main">
+          <div class="payment-client">${esc(client)}</div>
+          <div class="small muted">${esc(p.plan)} · +${esc(p.credits_granted)} créd. · ${p.payment_method === 'tarjeta' ? 'Tarjeta' : 'Efectivo'}</div>
+        </div>
+        <div class="payment-side">
+          <b>${esc(Number(p.amount_eur).toFixed(2))} €</b>
+          <span class="small muted">${esc(paymentDateLabel(p.created_at))}</span>
+        </div>
+        <button type="button" class="btn btn-sm btn-danger payment-del" data-del-payment="${id}" aria-label="Eliminar pago de ${esc(client)}">Eliminar</button>
+      </div>`;
+    }).join('')}</div>`;
+
+  el.querySelectorAll('[data-del-payment]').forEach((btn) => btn.addEventListener('click', async () => {
+    const id = Number(btn.dataset.delPayment);
+    if (!Number.isInteger(id) || id <= 0) return;
+    const ok = await confirmDialog(
+      'Eliminar pago',
+      'El pago dejará de contarse en la facturación. No se modificarán los bonos asignados ni los créditos concedidos al cliente. ¿Continuar?',
+      'Eliminar pago'
+    );
+    if (!ok) return;
+    try {
+      const data = await API.del('/trainer/payments/' + id);
+      toast(data.message || 'Pago eliminado');
+      await Promise.all([refreshFacturacionMetrics(), loadPayments()]);
+    } catch (e) { toast(e.message, 'err'); }
+  }));
 }
 
 function renderBonoList() {
@@ -4746,7 +5012,7 @@ function renderBonoList() {
   list.innerHTML = T.bonoPlans
     .map((b) => `<div class="bono-row ${b.is_active ? '' : 'inactive'}">
       <div style="flex:1;min-width:0;">
-        <b>${b.name}</b>
+        <b>${esc(b.name)}</b>
         <div class="small muted">${b.price_eur} € · ${b.credits} créditos · ${b.days_valid} días</div>
       </div>
       ${b.is_active ? '' : '<span class="badge badge-err">Inactivo</span>'}
@@ -4769,7 +5035,7 @@ function renderBonoList() {
   }));
   list.querySelectorAll('[data-remove-bono]').forEach((b) => b.addEventListener('click', async () => {
     const bono = T.bonoPlans.find((x) => x.id === Number(b.dataset.removeBono));
-    if (!(await confirmDialog('Eliminar bono', `¿Eliminar definitivamente el bono ${bono ? `<b>${bono.name}</b>` : ''}? Se borrará de la base de datos y de la lista. Las carteras ya asignadas a clientes se conservan con su etiqueta. Esta acción no se puede deshacer.`, 'Eliminar definitivamente'))) return;
+    if (!(await confirmDialog('Eliminar bono', `¿Eliminar definitivamente el bono ${bono ? bono.name : ''}? Se borrará de la base de datos y de la lista. Las carteras ya asignadas a clientes se conservan con su etiqueta. Esta acción no se puede deshacer.`, 'Eliminar definitivamente'))) return;
     try {
       await API.del('/trainer/bono-plans/' + Number(b.dataset.removeBono) + '/permanent');
       toast('Bono eliminado');
@@ -4782,7 +5048,7 @@ function renderBonoList() {
 function openBonoModal(bono) {
   const overlay = showModal(`
     <h3>${bono ? 'Editar bono' : 'Nuevo bono'}</h3>
-    <div class="field"><label>Nombre</label><input id="b-name" value="${bono ? bono.name : ''}" placeholder="Ej. Bono 10 sesiones"></div>
+    <div class="field"><label>Nombre</label><input id="b-name" value="${esc(bono ? bono.name : '')}" placeholder="Ej. Bono 10 sesiones"></div>
     <div class="form-grid-3">
       <div class="field"><label>Precio (€)</label><input id="b-price" type="number" min="0" step="1" value="${bono ? bono.price_eur : ''}"></div>
       <div class="field"><label>Créditos</label><input id="b-credits" type="number" min="1" step="1" value="${bono ? bono.credits : ''}"></div>

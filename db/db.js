@@ -57,6 +57,15 @@ try {
   }
 } catch { /* sin migración */ }
 
+// Migración: users.token_version. Se incrementa al dar de baja la cuenta o al
+// cerrar todas las sesiones; los tokens emitidos antes dejan de valer.
+try {
+  const userCols4 = db.prepare("SELECT name FROM pragma_table_info('users')").all().map((c) => c.name);
+  if (!userCols4.includes('token_version')) {
+    db.exec('ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0');
+  }
+} catch { /* sin migración */ }
+
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -77,6 +86,7 @@ CREATE TABLE IF NOT EXISTS users (
   credits_expires_at TEXT,
   is_active INTEGER NOT NULL DEFAULT 1,
   email_notifications INTEGER NOT NULL DEFAULT 1,
+  token_version INTEGER NOT NULL DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now'))
 );
 

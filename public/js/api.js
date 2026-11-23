@@ -118,29 +118,70 @@ const Dates = {
 };
 
 // ---------- Tiempo real (Server-Sent Events) ----------
-// Conecta un stream SSE autenticado por token (query, porque EventSource no
-// permite cabeceras). El navegador/WebView reconecta solo. handlers: { tipo: (payload) => {} }
+// Conecta un stream SSE autenticado con un ticket efímero (EventSource no
+// permite cabeceras). Si el stream se cae, se pide un ticket nuevo y se
+// reconecta. handlers: { tipo: (payload) => {} }
 const Realtime = (() => {
   let es = null;
+  let connecting = null;
+  let handlersRef = {};
+  let stopped = false;
+  let retryTimer = null;
+
+  // Ticket efímero (90 s). Nunca se pone el JWT de sesión en la URL: quedaría
+  // en logs, historial del navegador y proxies intermedios.
+  async function fetchTicket() {
+    try {
+      const data = await API.get('/auth/events-ticket');
+      return data && data.ticket ? data.ticket : null;
+    } catch {
+      return null;
+    }
+  }
 
   function connect(handlers = {}) {
-    if (!window.EventSource || es) return es;
-    const base = (window.APP_CONFIG && window.APP_CONFIG.apiBaseUrl) || '';
-    const token = API.getToken();
-    if (!token) return null;
-    es = new EventSource((base || '/api') + '/events?token=' + encodeURIComponent(token));
-    es.onmessage = (e) => {
-      let msg;
-      try { msg = JSON.parse(e.data); } catch { return; }
-      if (msg && msg.type && handlers[msg.type]) {
-        try { handlers[msg.type](msg); } catch (err) { console.warn('[realtime]', err); }
-      }
-    };
-    es.onerror = () => { /* EventSource reintenta automáticamente */ };
-    return es;
+    if (handlers && typeof handlers === 'object') handlersRef = handlers;
+    if (!window.EventSource) return Promise.resolve(null);
+    if (es) return Promise.resolve(es);
+    if (connecting) return connecting;
+    if (!API.getToken()) return Promise.resolve(null);
+    stopped = false;
+
+    connecting = (async () => {
+      const base = (window.APP_CONFIG && window.APP_CONFIG.apiBaseUrl) || '';
+      const ticket = await fetchTicket();
+      if (!ticket || stopped) return null;
+      if (es) return es;
+      const source = new EventSource((base || '/api') + '/events?ticket=' + encodeURIComponent(ticket));
+      es = source;
+      source.onmessage = (e) => {
+        let msg;
+        try { msg = JSON.parse(e.data); } catch { return; }
+        if (msg && msg.type && handlersRef[msg.type]) {
+          try { handlersRef[msg.type](msg); } catch (err) { console.warn('[realtime]', err); }
+        }
+      };
+      source.onerror = () => {
+        // El ticket caduca a los 90 s: si la conexión se cae, EventSource
+        // reintentaría con el ticket viejo. Se cierra y se pide uno nuevo antes
+        // de reconectar.
+        if (stopped) return;
+        try { source.close(); } catch { /* noop */ }
+        if (es === source) es = null;
+        clearTimeout(retryTimer);
+        retryTimer = setTimeout(() => {
+          if (!stopped && API.getToken()) connect(handlersRef);
+        }, 5000);
+      };
+      return source;
+    })().finally(() => { connecting = null; });
+
+    return connecting;
   }
 
   function close() {
+    stopped = true;
+    clearTimeout(retryTimer);
     if (es) { es.close(); es = null; }
   }
 
@@ -154,9 +195,20 @@ function el(html) {
   return t.content.firstElementChild;
 }
 
+// Escapa texto para insertarlo en HTML. Todo dato que venga del servidor o del
+// usuario debe pasar por aquí antes de entrar en un innerHTML.
+function escHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (ch) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]
+  ));
+}
+
 function toast(msg, type = 'ok') {
   const colors = { ok: '#16a34a', err: '#e11d48', warn: '#d97706', info: '#063DA8' };
-  const box = el(`<div style="position:fixed;left:50%;transform:translateX(-50%);bottom:24px;background:${colors[type]};color:#fff;padding:12px 20px;border-radius:12px;font-weight:600;font-size:14px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:90vw;">${msg}</div>`);
+  const bg = colors[type] || colors.ok;
+  const box = el(`<div style="position:fixed;left:50%;transform:translateX(-50%);bottom:24px;background:${bg};color:#fff;padding:12px 20px;border-radius:12px;font-weight:600;font-size:14px;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.25);max-width:90vw;"></div>`);
+  // textContent evita que un mensaje del servidor pueda inyectar HTML.
+  box.textContent = String(msg == null ? '' : msg);
   document.body.appendChild(box);
   setTimeout(() => box.remove(), 3200);
 }
@@ -164,11 +216,14 @@ function toast(msg, type = 'ok') {
 function confirmDialog(title, message, confirmLabel = 'Confirmar', danger = true) {
   return new Promise((resolve) => {
     const overlay = el(`<div class="overlay"><div class="modal">
-      <h3>${title}</h3><p>${message}</p>
+      <h3></h3><p></p>
       <div class="modal-actions">
         <button class="btn btn-ghost" data-act="cancel">Cancelar</button>
-        <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" data-act="ok">${confirmLabel}</button>
+        <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" data-act="ok"></button>
       </div></div></div>`);
+    overlay.querySelector('h3').textContent = String(title == null ? '' : title);
+    overlay.querySelector('p').textContent = String(message == null ? '' : message);
+    overlay.querySelector('[data-act="ok"]').textContent = String(confirmLabel == null ? 'Confirmar' : confirmLabel);
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay || e.target.dataset.act === 'cancel') { overlay.remove(); resolve(false); }
       if (e.target.dataset.act === 'ok') { overlay.remove(); resolve(true); }
@@ -189,11 +244,22 @@ function initials(name) {
   return (name || '?').split(' ').filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
 }
 
+// Solo se permiten imágenes incrustadas (data:image) o URLs http(s): un
+// `javascript:` o un `data:text/html` en avatar_photo no debe ejecutarse.
+function safeImageSrc(src) {
+  const s = String(src || '').trim();
+  if (/^data:image\/(?:png|jpe?g|gif|webp|avif|bmp);base64,[a-z0-9+/=\s]+$/i.test(s)) return s;
+  if (/^https?:\/\/[^\s"'<>]+$/i.test(s)) return s;
+  return '';
+}
+
 function avatarHtml(user, size = 40) {
-  if (user && user.avatar_photo) {
-    return `<img class="avatar" style="width:${size}px;height:${size}px;" src="${user.avatar_photo}" alt="">`;
+  const px = Number(size) || 40;
+  const src = safeImageSrc(user && user.avatar_photo);
+  if (src) {
+    return `<img class="avatar" style="width:${px}px;height:${px}px;" src="${escHtml(src)}" alt="">`;
   }
-  return `<span class="avatar avatar-fallback" style="width:${size}px;height:${size}px;font-size:${size * 0.38}px;">${initials(user && user.full_name)}</span>`;
+  return `<span class="avatar avatar-fallback" style="width:${px}px;height:${px}px;font-size:${px * 0.38}px;">${escHtml(initials(user && user.full_name))}</span>`;
 }
 
 // PWA: registro de Service Worker + suscripción a Web Push
@@ -394,6 +460,7 @@ window.API = API;
 window.Dates = Dates;
 window.Realtime = Realtime;
 window.el = el;
+window.escHtml = escHtml;
 window.toast = toast;
 window.confirmDialog = confirmDialog;
 window.showModal = showModal;

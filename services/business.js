@@ -2,6 +2,7 @@
 
 const { db, slotStartDateTime } = require('../db/db');
 const { broadcast, broadcastToUser } = require('./events');
+const { notifyAdminsNewBooking } = require('./notifications');
 
 const CANCEL_WINDOW_HOURS = Number(process.env.CANCEL_WINDOW_HOURS || 24);
 const CANCEL_WINDOW_MS = CANCEL_WINDOW_HOURS * 3600 * 1000;
@@ -264,6 +265,8 @@ function createBooking(slotId, userId) {
     db.exec('COMMIT');
     broadcast('session.updated', { slot_id: Number(slotId), reason: 'booking' });
     broadcastToUser(userId, 'credits.updated', { user_id: userId, reason: 'booking' });
+    // El correo es best-effort: la reserva ya está confirmada y no debe fallar por él.
+    notifyAdminsNewBooking({ client: user, slot, bookingId });
     return bookingId;
   } catch (e) {
     db.exec('ROLLBACK');
@@ -415,7 +418,7 @@ function deactivateClient(userId) {
       }
       recomputeUserCredits(userId);
     }
-    db.prepare('UPDATE users SET is_active = 0 WHERE id = ?').run(userId);
+    db.prepare('UPDATE users SET is_active = 0, token_version = token_version + 1 WHERE id = ?').run(userId);
     db.exec('COMMIT');
     broadcast('session.updated', { reason: 'client_deactivated' });
     broadcastToUser(userId, 'credits.updated', { user_id: userId, reason: 'deactivate' });

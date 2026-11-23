@@ -52,6 +52,47 @@ function appLink() {
   return `${String(base).replace(/\/+$/, '')}/client.html`;
 }
 
+function adminLink() {
+  const base = process.env.PUBLIC_BASE_URL || process.env.APP_BASE_URL;
+  if (!base) return null;
+  return `${String(base).replace(/\/+$/, '')}/trainer.html`;
+}
+
+// Aviso a los administradores (role 'trainer') cuando un cliente reserva.
+// Se llama después del COMMIT de createBooking; cualquier fallo del correo
+// se registra pero nunca hace fallar una reserva ya confirmada.
+function notifyAdminsNewBooking({ client, slot, bookingId = null } = {}) {
+  try {
+    if (!client || !slot) return;
+    const admins = db.prepare(
+      `SELECT id, full_name, email, email_notifications FROM users
+       WHERE role = 'trainer' AND is_active = 1
+         AND email IS NOT NULL AND email <> ''`
+    ).all().filter((a) => a.email_notifications !== 0);
+    if (!admins.length) return;
+
+    const booking = {
+      bookingId,
+      clientName: client.full_name || client.email || 'Cliente',
+      clientEmail: client.email || 'sin email',
+      date: slot.date,
+      time: slot.start_time,
+      endTime: slot.end_time,
+      theme: slot.theme,
+      kind: slot.kind,
+    };
+    const link = adminLink();
+    for (const admin of admins) {
+      Promise.resolve(mailer.sendAdminBookingEmail(admin, booking, link))
+        .catch((e) => {
+          console.warn('[notifications] No se pudo avisar al administrador de la reserva:', e.message);
+        });
+    }
+  } catch (e) {
+    console.warn('[notifications] No se pudo preparar el aviso de reserva:', e.message);
+  }
+}
+
 // Copia por email de los avisos y alertas. Solo para clientes que no hayan
 // desactivado la preferencia. Los correos de recuperación/seguridad no pasan
 // por aquí: se envían siempre desde services/passwords.js.
@@ -215,4 +256,4 @@ function startScheduler() {
   console.log('Scheduler de notificaciones activo (cada 60s)');
 }
 
-module.exports = { startScheduler, createNotification, sendPush, notify, vapidKeys, runClientAlerts, notificationKind };
+module.exports = { startScheduler, createNotification, sendPush, notify, notifyAdminsNewBooking, vapidKeys, runClientAlerts, notificationKind };

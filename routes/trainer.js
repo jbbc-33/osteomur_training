@@ -10,6 +10,7 @@ const { notify } = require('../services/notifications');
 const { broadcast, broadcastToUser } = require('../services/events');
 const { listTags, listExercisesWithTags, syncExerciseTags } = require('../services/exercises');
 const { setUserPassword } = require('../services/passwords');
+const { text, optionalText, int, videoUrl, avatarPhoto } = require('../middleware/validate');
 
 const router = express.Router();
 router.use(requireAuth, requireTrainer);
@@ -161,7 +162,9 @@ router.put('/slots/:id', (req, res, next) => {
     const end_time = `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
     const capacityV = capacity !== undefined && capacity !== '' ? Number(capacity) : slot.capacity;
     const costV = credit_cost !== undefined && credit_cost !== '' ? Number(credit_cost) : slot.credit_cost;
-    const themeV = theme !== undefined ? (String(theme).trim() || null) : slot.theme;
+    const themeV = theme !== undefined
+      ? (theme == null || String(theme).trim() === '' ? null : String(theme).trim())
+      : slot.theme;
     const exV = exercises !== undefined ? (exercises ? JSON.stringify(exercises) : null) : slot.exercises_json;
     const targetedJson = targeting.targeted_to ? JSON.stringify(targeting.targeted_to) : null;
 
@@ -241,6 +244,9 @@ function parseTemplateBody(body) {
   if (!Number.isInteger(dow) || dow < 1 || dow > 7) throw new ApiError(400, 'day_of_week debe ser 1-7 (1 = lunes)');
   if (!/^\d{2}:\d{2}$/.test(start_time || '')) throw new ApiError(400, 'Hora inválida (HH:MM)');
   if (end_time && !/^\d{2}:\d{2}$/.test(end_time)) throw new ApiError(400, 'Hora fin inválida (HH:MM)');
+  const cap = capacity !== undefined && capacity !== '' ? int(capacity, { min: 1, max: 100, field: 'El aforo' }) : 4;
+  const cost = credit_cost !== undefined && credit_cost !== '' ? int(credit_cost, { min: 1, max: 1000, field: 'El coste en créditos' }) : 1;
+  const cleanTheme = theme !== undefined ? optionalText(theme, { max: 160, field: 'El título de la sesión' }) : null;
   const [h, m] = start_time.split(':').map(Number);
   const end = end_time ? end_time.split(':').map(Number).reduce((x, y, i) => (i === 0 ? y : x * 60 + y), 0) : h * 60 + m + Number(duration_minutes || 60);
   const eh = Math.floor(end / 60), em = end % 60;
@@ -260,9 +266,9 @@ function parseTemplateBody(body) {
     day_of_week: dow,
     start_time,
     end_time: `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`,
-    capacity: capacity !== undefined && capacity !== '' ? Number(capacity) : 4,
-    credit_cost: credit_cost !== undefined && credit_cost !== '' ? Number(credit_cost) : 1,
-    theme: theme !== undefined ? (String(theme).trim() || null) : null,
+    capacity: cap,
+    credit_cost: cost,
+    theme: cleanTheme,
     exercises_json: exercises ? JSON.stringify(exercises) : null,
     kind,
     targeted_to: targetedIds,
@@ -359,7 +365,10 @@ router.get('/bono-plans', (req, res, next) => {
 });
 
 function parseBono(body, existing) {
-  const name = (body.name !== undefined ? String(body.name).trim() : existing?.name) || '';
+  const rawName = body.name !== undefined ? body.name : existing?.name;
+  const name = rawName === undefined || rawName === null
+    ? ''
+    : text(rawName, { max: 80, field: 'El nombre del bono' });
   if (!name) throw new ApiError(400, 'El nombre del bono es obligatorio');
   const price_eur = body.price_eur !== undefined && body.price_eur !== '' ? Number(body.price_eur) : existing?.price_eur;
   const credits = body.credits !== undefined && body.credits !== '' ? Number(body.credits) : existing?.credits;
@@ -426,8 +435,11 @@ router.delete('/bono-plans/:id/permanent', (req, res, next) => {
 router.get('/wallets', (req, res, next) => {
   try {
     const wallets = db.prepare(`
-      SELECT w.id, w.user_id, w.source, w.label, w.credits_remaining, w.expires_at, u.full_name
-      FROM credit_wallets w JOIN users u ON u.id = w.user_id
+      SELECT w.id, w.user_id, w.source, w.bono_plan_id, w.label, w.credits_remaining, w.expires_at,
+             u.full_name, bp.name AS bono_name
+      FROM credit_wallets w
+      JOIN users u ON u.id = w.user_id
+      LEFT JOIN bono_plans bp ON bp.id = w.bono_plan_id
       WHERE w.credits_remaining > 0
       ORDER BY (w.expires_at IS NULL) ASC, w.expires_at ASC, u.full_name ASC
     `).all();
@@ -553,9 +565,14 @@ router.delete('/session-log/:id', (req, res, next) => {
 // ---------- Notas médicas / perfil ----------
 router.put('/client/:id/notes', (req, res, next) => {
   try {
-    const { notes, active_injuries, sex, objectives, priorities } = req.body || {};
+    const b = req.body || {};
+    const notes = b.notes === undefined ? null : optionalText(b.notes, { max: 5000, field: 'Las notas' });
+    const injuries = b.active_injuries === undefined ? null : optionalText(b.active_injuries, { max: 1000, field: 'Las lesiones' });
+    const sex = b.sex === undefined ? null : optionalText(b.sex, { max: 20, field: 'El sexo' });
+    const objectives = b.objectives === undefined ? null : optionalText(b.objectives, { max: 2000, field: 'Los objetivos' });
+    const priorities = b.priorities === undefined ? null : optionalText(b.priorities, { max: 2000, field: 'Las prioridades' });
     db.prepare('UPDATE users SET notes = COALESCE(?, notes), active_injuries = COALESCE(?, active_injuries), sex = COALESCE(?, sex), objectives = COALESCE(?, objectives), priorities = COALESCE(?, priorities) WHERE id = ?')
-      .run(notes ?? null, active_injuries ?? null, sex ?? null, objectives ?? null, priorities ?? null, Number(req.params.id));
+      .run(notes, injuries, sex, objectives, priorities, Number(req.params.id));
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
@@ -582,7 +599,10 @@ router.put('/client/:id/nutrition', (req, res, next) => {
     const id = Number(req.params.id);
     const client = db.prepare("SELECT id FROM users WHERE id = ? AND role = 'client'").get(id);
     if (!client) throw new ApiError(404, 'Cliente no encontrado');
-    const { name, notes, meals } = req.body || {};
+    const b = req.body || {};
+    const planName = optionalText(b.name, { max: 120, field: 'El nombre del plan' });
+    const planNotes = optionalText(b.notes, { max: 5000, field: 'Las notas del plan' });
+    const meals = b.meals;
     const mealsArr = Array.isArray(meals) ? meals : [];
     if (mealsArr.length > 70) throw new ApiError(400, 'Demasiadas comidas');
 
@@ -592,11 +612,11 @@ router.put('/client/:id/nutrition', (req, res, next) => {
       let planId = plan ? plan.id : null;
       if (!planId) {
         const r = db.prepare('INSERT INTO nutrition_plans (user_id, name, notes) VALUES (?,?,?)')
-          .run(id, (name || '').trim() || 'Plan de nutrición', notes || null);
+          .run(id, planName || 'Plan de nutrición', planNotes);
         planId = Number(r.lastInsertRowid);
       } else {
         db.prepare('UPDATE nutrition_plans SET name = ?, notes = ?, updated_at = datetime(\'now\') WHERE id = ?')
-          .run((name || '').trim() || plan.name || 'Plan de nutrición', notes ?? plan.notes, planId);
+          .run(planName || plan.name || 'Plan de nutrición', b.notes === undefined ? plan.notes : planNotes, planId);
       }
       db.prepare('DELETE FROM nutrition_meals WHERE plan_id = ?').run(planId);
       const ins = db.prepare(
@@ -606,14 +626,24 @@ router.put('/client/:id/nutrition', (req, res, next) => {
       mealsArr.forEach((m, i) => {
         const dow = Number(m.day_of_week);
         if (!Number.isInteger(dow) || dow < 1 || dow > 7) throw new ApiError(400, `Comida ${i + 1}: day_of_week debe ser 1-7`);
-        if (!(m.meal_type || '').trim()) throw new ApiError(400, `Comida ${i + 1}: falta el tipo de comida`);
+        const mealType = text(m.meal_type, { max: 60, field: `Comida ${i + 1}: el tipo` });
+        if (!mealType) throw new ApiError(400, `Comida ${i + 1}: falta el tipo de comida`);
+        const num = (v) => (v !== undefined && v !== '' && v !== null ? Number(v) : null);
+        const safeNum = (v, label) => {
+          const n = num(v);
+          if (n === null) return null;
+          if (!Number.isFinite(n) || n < 0 || n > 100000) throw new ApiError(400, `Comida ${i + 1}: ${label} inválido`);
+          return n;
+        };
         ins.run(
-          planId, dow, i + 1, m.meal_type.trim(), m.dish_name ? String(m.dish_name).trim() || null : null,
-          m.recipe || null, m.description || null,
-          m.calories_goal !== undefined && m.calories_goal !== '' ? Number(m.calories_goal) : null,
-          m.proteins_g !== undefined && m.proteins_g !== '' ? Number(m.proteins_g) : null,
-          m.carbs_g !== undefined && m.carbs_g !== '' ? Number(m.carbs_g) : null,
-          m.fats_g !== undefined && m.fats_g !== '' ? Number(m.fats_g) : null
+          planId, dow, i + 1, mealType,
+          optionalText(m.dish_name, { max: 200, field: `Comida ${i + 1}: el plato` }),
+          optionalText(m.recipe, { max: 5000, field: `Comida ${i + 1}: la receta` }),
+          optionalText(m.description, { max: 2000, field: `Comida ${i + 1}: la descripción` }),
+          safeNum(m.calories_goal, 'las calorías'),
+          safeNum(m.proteins_g, 'las proteínas'),
+          safeNum(m.carbs_g, 'los hidratos'),
+          safeNum(m.fats_g, 'las grasas')
         );
       });
       db.exec('COMMIT');
@@ -695,7 +725,10 @@ router.put('/client/:id/training-plan', (req, res, next) => {
     const id = Number(req.params.id);
     const client = db.prepare("SELECT id FROM users WHERE id = ? AND role = 'client'").get(id);
     if (!client) throw new ApiError(404, 'Cliente no encontrado');
-    const { name, notes, exercises } = req.body || {};
+    const b = req.body || {};
+    const planName = optionalText(b.name, { max: 120, field: 'El nombre del plan' });
+    const planNotes = optionalText(b.notes, { max: 5000, field: 'Las notas del plan' });
+    const exercises = b.exercises;
     const exArr = Array.isArray(exercises) ? exercises : [];
     if (exArr.length > 80) throw new ApiError(400, 'Demasiados ejercicios');
 
@@ -705,11 +738,11 @@ router.put('/client/:id/training-plan', (req, res, next) => {
       let planId = plan ? plan.id : null;
       if (!planId) {
         const r = db.prepare('INSERT INTO training_plans (user_id, name, notes) VALUES (?,?,?)')
-          .run(id, (name || '').trim() || 'Plan de entrenamiento', notes || null);
+          .run(id, planName || 'Plan de entrenamiento', planNotes);
         planId = Number(r.lastInsertRowid);
       } else {
         db.prepare('UPDATE training_plans SET name = ?, notes = ?, updated_at = datetime(\'now\') WHERE id = ?')
-          .run((name || '').trim() || plan.name || 'Plan de entrenamiento', notes ?? plan.notes, planId);
+          .run(planName || plan.name || 'Plan de entrenamiento', b.notes === undefined ? plan.notes : planNotes, planId);
       }
       db.prepare('DELETE FROM training_plan_exercises WHERE plan_id = ?').run(planId);
       const ins = db.prepare(
@@ -722,11 +755,13 @@ router.put('/client/:id/training-plan', (req, res, next) => {
         if (!db.prepare('SELECT 1 FROM exercises WHERE id = ?').get(exerciseId)) throw new ApiError(400, `Ejercicio ${i + 1}: no existe en la biblioteca`);
         const dow = ex.day_of_week === undefined || ex.day_of_week === '' || ex.day_of_week === null ? null : Number(ex.day_of_week);
         if (dow !== null && (!Number.isInteger(dow) || dow < 1 || dow > 7)) throw new ApiError(400, `Ejercicio ${i + 1}: día de la semana inválido (1-7)`);
-        ins.run(planId, exerciseId, dow,
-          ex.sets !== undefined && ex.sets !== '' ? Number(ex.sets) : null,
-          ex.reps !== undefined && ex.reps !== '' ? String(ex.reps) : null,
-          ex.rest_sec !== undefined && ex.rest_sec !== '' ? Number(ex.rest_sec) : null,
-          ex.notes || null, i + 1);
+        const sets = ex.sets !== undefined && ex.sets !== '' ? int(ex.sets, { min: 0, max: 100, field: `Ejercicio ${i + 1}: las series` }) : null;
+        const rest = ex.rest_sec !== undefined && ex.rest_sec !== '' ? int(ex.rest_sec, { min: 0, max: 3600, field: `Ejercicio ${i + 1}: el descanso` }) : null;
+        const reps = ex.reps !== undefined && ex.reps !== null
+          ? optionalText(ex.reps, { max: 60, field: `Ejercicio ${i + 1}: las repeticiones` })
+          : null;
+        ins.run(planId, exerciseId, dow, sets, reps, rest,
+          optionalText(ex.notes, { max: 1000, field: `Ejercicio ${i + 1}: las notas` }), i + 1);
       });
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
@@ -836,6 +871,10 @@ router.put('/client/:id/assessment', (req, res, next) => {
 
     const parq = b.parq_answers && typeof b.parq_answers === 'object' ? b.parq_answers : {};
     const apto = Object.values(parq).every((v) => v === false || v === 'no' || v === null || v === undefined) ? 1 : 0;
+    const assessmentNotes = b.notes != null ? text(b.notes, { max: 10000, field: 'Las notas' }) : null;
+    const stress = b.stress_level ? text(b.stress_level, { max: 40, field: 'El nivel de estrés' }) : null;
+    // La firma se pinta en el informe como imagen: solo data:image o http(s).
+    const signature = b.signature_png ? avatarPhoto(b.signature_png, { maxBytes: 1024 * 1024 }) : null;
 
     db.exec('BEGIN IMMEDIATE');
     let assessment;
@@ -852,17 +891,17 @@ router.put('/client/:id/assessment', (req, res, next) => {
           profile,
           b.consent_ok ? 1 : 0,
           b.consent_ok ? new Date().toISOString() : existing.consent_at,
-          b.signature_png || existing.signature_png,
+          signature || existing.signature_png,
           JSON.stringify(parq),
           apto,
           b.systolic_mmhg || null, b.diastolic_mmhg || null, b.rest_hr || null,
           JSON.stringify(b.pain_map || []),
           b.sleep_hours != null && b.sleep_hours !== '' ? Number(b.sleep_hours) : null,
           b.sleep_quality != null && b.sleep_quality !== '' ? Number(b.sleep_quality) : null,
-          b.stress_level || null,
+          stress,
           b.sitting_hours != null && b.sitting_hours !== '' ? Number(b.sitting_hours) : null,
           b.tests_json != null ? JSON.stringify(b.tests_json) : existing.tests_json,
-          b.notes != null ? String(b.notes) : existing.notes,
+          b.notes != null ? assessmentNotes : existing.notes,
           existing.id
         );
         aid = existing.id;
@@ -873,15 +912,15 @@ router.put('/client/:id/assessment', (req, res, next) => {
            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
         ).run(
           id, kind, profile, b.consent_ok ? 1 : 0, b.consent_ok ? new Date().toISOString() : null,
-          b.signature_png || null, JSON.stringify(parq), apto,
+          signature, JSON.stringify(parq), apto,
           b.systolic_mmhg || null, b.diastolic_mmhg || null, b.rest_hr || null,
           JSON.stringify(b.pain_map || []),
           b.sleep_hours != null && b.sleep_hours !== '' ? Number(b.sleep_hours) : null,
           b.sleep_quality != null && b.sleep_quality !== '' ? Number(b.sleep_quality) : null,
-          b.stress_level || null,
+          stress,
           b.sitting_hours != null && b.sitting_hours !== '' ? Number(b.sitting_hours) : null,
           b.tests_json != null ? JSON.stringify(b.tests_json) : null,
-          b.notes != null ? String(b.notes) : null
+          assessmentNotes
         );
         aid = Number(r.lastInsertRowid);
       }
@@ -1044,9 +1083,21 @@ router.post('/credits', (req, res, next) => {
 // ---------- Valoración corporal + informe automático ----------
 router.post('/body-composition', (req, res, next) => {
   try {
-    const { user_id, measured_on, weight_kg, body_fat_pct, muscle_kg, isak_folds, notes } = req.body || {};
+    const b = req.body || {};
+    const { user_id, measured_on, weight_kg, body_fat_pct, muscle_kg, isak_folds } = b;
     if (!user_id) throw new ApiError(400, 'user_id requerido');
     const date = measured_on || toDateStr(new Date());
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date))) throw new ApiError(400, 'Fecha de medición inválida (YYYY-MM-DD)');
+    const compNotes = optionalText(b.notes, { max: 5000, field: 'Las notas' });
+    const numOrNull = (v, min, max, label) => {
+      if (v === undefined || v === null || v === '') return null;
+      const n = Number(v);
+      if (!Number.isFinite(n) || n < min || n > max) throw new ApiError(400, `${label} fuera de rango (${min}-${max})`);
+      return n;
+    };
+    const weight = numOrNull(weight_kg, 0, 500, 'El peso');
+    const fat = numOrNull(body_fat_pct, 0, 100, 'El % de grasa');
+    const muscle = numOrNull(muscle_kg, 0, 300, 'La masa muscular');
 
     const existing = db.prepare('SELECT id FROM body_compositions WHERE user_id = ? AND measured_on = ?').get(Number(user_id), date);
     if (existing) throw new ApiError(409, 'Ya existe una valoración para esta fecha. Usa la edición.');
@@ -1054,7 +1105,7 @@ router.post('/body-composition', (req, res, next) => {
     const r = db.prepare(
       `INSERT INTO body_compositions (user_id, measured_on, weight_kg, body_fat_pct, muscle_kg, isak_folds_json, notes)
        VALUES (?,?,?,?,?,?,?)`
-    ).run(Number(user_id), date, weight_kg || null, body_fat_pct || null, muscle_kg || null, isak_folds ? JSON.stringify(isak_folds) : null, notes || null);
+    ).run(Number(user_id), date, weight, fat, muscle, isak_folds ? JSON.stringify(isak_folds) : null, compNotes);
 
     const compId = Number(r.lastInsertRowid);
     const report = generateCompositionReport(Number(user_id), compId);
@@ -1129,12 +1180,16 @@ router.delete('/exercise-tags/:id', (req, res, next) => {
 router.post('/exercises', (req, res, next) => {
   try {
     const body = req.body || {};
-    const { name, description, technique_tips, video_url, tag_ids } = body;
+    const { description, technique_tips, video_url, tag_ids } = body;
+    const name = text(body.name, { max: 120, field: 'El nombre del ejercicio' });
     if (!name) throw new ApiError(400, 'name requerido');
+    const desc = optionalText(description, { max: 5000, field: 'La descripción' });
+    const tips = optionalText(technique_tips, { max: 5000, field: 'Los consejos de técnica' });
+    const video = videoUrl(video_url);
     db.exec('BEGIN IMMEDIATE');
     try {
       const r = db.prepare('INSERT INTO exercises (name, description, technique_tips, video_url) VALUES (?,?,?,?)')
-        .run(name.trim(), description || null, technique_tips || null, video_url || null);
+        .run(name, desc, tips, video);
       const id = Number(r.lastInsertRowid);
       syncExerciseTags(id, tag_ids);
       db.exec('COMMIT');
@@ -1149,14 +1204,19 @@ router.post('/exercises', (req, res, next) => {
 router.put('/exercises/:id', (req, res, next) => {
   try {
     const body = req.body || {};
-    const { name, description, technique_tips, video_url } = body;
+    const { description, technique_tips, video_url } = body;
     const hasTags = Object.prototype.hasOwnProperty.call(body, 'tag_ids');
     const ex = db.prepare('SELECT * FROM exercises WHERE id = ?').get(Number(req.params.id));
     if (!ex) throw new ApiError(404, 'Ejercicio no encontrado');
+    const name = body.name === undefined ? ex.name : text(body.name, { max: 120, field: 'El nombre del ejercicio' });
+    if (!name) throw new ApiError(400, 'El nombre del ejercicio es obligatorio');
+    const desc = body.description === undefined ? ex.description : optionalText(description, { max: 5000, field: 'La descripción' });
+    const tips = body.technique_tips === undefined ? ex.technique_tips : optionalText(technique_tips, { max: 5000, field: 'Los consejos de técnica' });
+    const video = body.video_url === undefined ? ex.video_url : videoUrl(video_url);
     db.exec('BEGIN IMMEDIATE');
     try {
       db.prepare('UPDATE exercises SET name=?, description=?, technique_tips=?, video_url=? WHERE id=?')
-        .run(name ?? ex.name, description ?? ex.description, technique_tips ?? ex.technique_tips, video_url ?? ex.video_url, ex.id);
+        .run(name, desc, tips, video, ex.id);
       if (hasTags) syncExerciseTags(ex.id, body.tag_ids);
       db.exec('COMMIT');
       res.json({ ok: true });
@@ -1177,6 +1237,62 @@ router.delete('/exercises/:id', (req, res, next) => {
     db.prepare('DELETE FROM training_plan_exercises WHERE exercise_id = ?').run(id);
     db.prepare('DELETE FROM exercises WHERE id = ?').run(id);
     res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// ---------- Últimos pagos (facturación) ----------
+// Un "pago" es una fila de packages. Los créditos concedidos viven en
+// credit_wallets / credit_transactions y NO se tocan al borrar un pago:
+// el borrado solo hace que ese importe deje de contarse en facturación.
+const MAX_PAYMENTS = 20;
+
+function paymentDate(value) {
+  const s = String(value == null ? '' : value).trim();
+  if (!s) return '';
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) throw new ApiError(400, 'La fecha debe tener formato YYYY-MM-DD');
+  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const d = new Date(Date.UTC(year, month - 1, day));
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) {
+    throw new ApiError(400, 'Fecha no válida');
+  }
+  return s;
+}
+
+router.get('/payments', (req, res, next) => {
+  try {
+    const limit = Math.min(MAX_PAYMENTS, Math.max(1, Number(req.query.limit) || MAX_PAYMENTS));
+    const search = String(req.query.search || '').trim().toLowerCase();
+    const date = paymentDate(req.query.date);
+    const where = [];
+    const args = [];
+    if (search) { where.push("LOWER(u.full_name) LIKE ? ESCAPE '\\'"); args.push('%' + search.replace(/[%_\\]/g, '\\$&') + '%'); }
+    if (date) { where.push('substr(p.created_at, 1, 10) = ?'); args.push(date); }
+    const clause = where.length ? 'WHERE ' + where.join(' AND ') : '';
+    const payments = db.prepare(
+      `SELECT p.id, p.user_id, p.plan, p.amount_eur, p.credits_granted, p.payment_method,
+              p.created_at, p.expires_at, u.full_name
+       FROM packages p JOIN users u ON u.id = p.user_id
+       ${clause}
+       ORDER BY p.created_at DESC, p.id DESC LIMIT ?`
+    ).all(...args, limit);
+    const total = db.prepare(
+      `SELECT COUNT(*) AS c FROM packages p JOIN users u ON u.id = p.user_id ${clause}`
+    ).get(...args).c;
+    res.json({ payments, total, limit: MAX_PAYMENTS });
+  } catch (e) { next(e); }
+});
+
+router.delete('/payments/:id', (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) throw new ApiError(400, 'Pago no válido');
+    const payment = db.prepare('SELECT id FROM packages WHERE id = ?').get(id);
+    if (!payment) throw new ApiError(404, 'Pago no encontrado');
+    // Borrado exclusivo de la fila de facturación: ni carteras, ni créditos,
+    // ni transacciones, ni bonos asignados se modifican.
+    db.prepare('DELETE FROM packages WHERE id = ?').run(id);
+    res.json({ ok: true, message: 'Pago eliminado de la facturación. Los bonos y créditos del cliente se conservan.' });
   } catch (e) { next(e); }
 });
 

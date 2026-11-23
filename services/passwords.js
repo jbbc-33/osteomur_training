@@ -18,7 +18,7 @@ const { ApiError } = require('./business');
 const { notify } = require('./notifications');
 const mailer = require('./mailer');
 
-const MIN_PASSWORD_LENGTH = 6;
+const MIN_PASSWORD_LENGTH = 8;
 const MAX_PASSWORD_BYTES = 72; // límite de bcrypt
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hora
 
@@ -61,6 +61,12 @@ function invalidateUserTokens(userId) {
   ).run(userId);
 }
 
+// Revoca todas las sesiones activas: los JWT con una versión anterior dejan de
+// valer en la siguiente petición (también el stream SSE, que valida `tv`).
+function revokeUserSessions(userId) {
+  db.prepare('UPDATE users SET token_version = token_version + 1 WHERE id = ?').run(userId);
+}
+
 function sendInBackground(promise) {
   Promise.resolve(promise).catch((e) => {
     console.warn('[passwords] No se pudo enviar el correo:', e.message);
@@ -78,7 +84,9 @@ async function setUserPassword(userId, password, options = {}) {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   if (!user) throw new ApiError(404, 'Usuario no encontrado');
 
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(password), userId);
+  db.prepare(
+    'UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?'
+  ).run(hashPassword(password), userId);
   invalidateUserTokens(userId);
 
   const fresh = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
@@ -158,7 +166,9 @@ async function resetPasswordWithToken(rawToken, newPassword) {
     throw new ApiError(400, 'El enlace no es válido o ha caducado');
   }
 
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword), user.id);
+  db.prepare(
+    'UPDATE users SET password_hash = ?, token_version = token_version + 1 WHERE id = ?'
+  ).run(hashPassword(newPassword), user.id);
   invalidateUserTokens(user.id);
 
   notify(user.id, 'Contraseña actualizada', 'Has recuperado tu cuenta con una contraseña nueva. Solo funciona la más reciente.', 'info', null, { email: false });
@@ -181,4 +191,5 @@ module.exports = {
   requestPasswordReset,
   resetPasswordWithToken,
   invalidateUserTokens,
+  revokeUserSessions,
 };

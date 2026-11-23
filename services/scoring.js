@@ -60,16 +60,23 @@ function scoreAdultoMayor(tests, testsJson, user) {
   const extra = {};
 
   const gripRef = handgripRef(user.sex);
-  const gripD = bestOf(tj.prension && tj.prension.d) != null ? lin(bestOf(tj.prension && tj.prension.d), 0, gripRef) : null;
-  const gripI = bestOf(tj.prension && tj.prension.i) != null ? lin(bestOf(tj.prension && tj.prension.i), 0, gripRef) : null;
-  const sit30 = tj.sit30 && num(tj.sit30.conteo) != null ? lin(num(tj.sit30.conteo), 0, 18) : null;
-  const sit5 = tj.sit5 && num(tj.sit5.elapsed) != null ? linInv(num(tj.sit5.elapsed), 8, 18) : null;
-  const fuerza = mean([sit30, sit5, gripD, gripI]);
-  if (fuerza != null) axes['Fuerza'] = fuerza;
-  if (gripD != null && gripI != null) extra.prension_media_kgf = Math.round(((bestOf(tj.prension.d) || 0) + (bestOf(tj.prension.i) || 0)) / 2);
+  // La batería simple guarda estas pruebas como tests planos; el formulario
+  // extendido las guarda dentro de tests_json.adulto_mayor. Se aceptan ambas.
+  const gripRight = num(t.handgrip_right) != null ? num(t.handgrip_right) : bestOf(tj.prension && tj.prension.d);
+  const gripLeft = num(t.handgrip_left) != null ? num(t.handgrip_left) : bestOf(tj.prension && tj.prension.i);
+  const sit30Count = num(t.chair_stand) != null ? num(t.chair_stand) : (tj.sit30 && num(tj.sit30.conteo));
+  const sit30 = sit30Count != null ? lin(sit30Count, 0, 18) : null;
+  const sit5 = tj.sit5 && num(tj.sit5.elapsed) != null ? linInv(num(tj.sit5.elapsed), 18, 8) : null;
+  const fuerzaPiernas = mean([sit30, sit5]);
+  if (fuerzaPiernas != null) axes['Fuerza'] = fuerzaPiernas;
+  const gripD = gripRight != null ? lin(gripRight, 0, gripRef) : null;
+  const gripI = gripLeft != null ? lin(gripLeft, 0, gripRef) : null;
+  const fuerzaMano = mean([gripD, gripI]);
+  if (fuerzaMano != null) axes['Fuerza de prensión'] = fuerzaMano;
+  if (gripRight != null && gripLeft != null) extra.prension_media_kgf = Math.round((gripRight + gripLeft) / 2);
 
   const tugS = num(t.tug) != null ? num(t.tug) : (tj.tug && num(tj.tug.elapsed) != null ? num(tj.tug.elapsed) : null);
-  if (tugS != null) axes['Movilidad'] = linInv(tugS, 8, 18);
+  if (tugS != null) axes['Movilidad'] = linInv(tugS, 18, 8);
 
   const eqTimeVals = [];
   if (tj.equilibrio) {
@@ -320,12 +327,76 @@ function scoreReadaptacion(tests, testsJson) {
   // Síntomas (menor dolor = mayor puntuación), opcional.
   const sint = d.sintomas;
   if (sint && sint.dolor != null && sint.dolor !== 0) {
-    axes['Síntomas / dolor'] = linInv(num(sint.dolor), 0, 10);
+    axes['Síntomas / dolor'] = linInv(num(sint.dolor), 10, 0);
   }
 
   const hasData = Object.keys(axes).length > 0;
   extra.parte = parte;
   return { axes, extra: hasData ? extra : { parte } };
+}
+
+// Regresión lineal carga-velocidad: v = v0 + b·carga. f0 es la carga teórica a
+// la que la velocidad llega a cero (en newtons) y Pmax = F0·V0/4 para un perfil
+// lineal. Se exigen al menos dos cargas distintas y pendiente negativa.
+function vbtProfile(vbt) {
+  const rows = (Array.isArray(vbt) ? vbt : [])
+    .map((r) => ({ load: num(r && r.load_kg), vel: num(r && r.velocity_ms) }))
+    .filter((r) => r.load != null && r.vel != null && r.load > 0 && r.vel > 0);
+  if (rows.length < 2 || new Set(rows.map((r) => r.load)).size < 2) return null;
+
+  const n = rows.length;
+  const meanLoad = rows.reduce((s, r) => s + r.load, 0) / n;
+  const meanVel = rows.reduce((s, r) => s + r.vel, 0) / n;
+  let cov = 0;
+  let varLoad = 0;
+  for (const r of rows) {
+    cov += (r.load - meanLoad) * (r.vel - meanVel);
+    varLoad += (r.load - meanLoad) ** 2;
+  }
+  if (!varLoad) return null;
+  const slope = cov / varLoad;
+  if (!(slope < 0)) return null;
+  const v0 = meanVel - slope * meanLoad;
+  if (!(v0 > 0)) return null;
+
+  const loadZero = -v0 / slope;
+  const f0N = loadZero * 9.81;
+  let ssTot = 0;
+  let ssRes = 0;
+  for (const r of rows) {
+    const predicted = v0 + slope * r.load;
+    ssRes += (r.vel - predicted) ** 2;
+    ssTot += (r.vel - meanVel) ** 2;
+  }
+  const r2 = ssTot > 0 ? Math.max(0, Math.min(1, 1 - ssRes / ssTot)) : 1;
+  return {
+    f0_N: +f0N.toFixed(1),
+    v0_ms: +v0.toFixed(3),
+    pmax_w: +((f0N * v0) / 4).toFixed(1),
+    vbt_load_intercept_kg: +loadZero.toFixed(1),
+    vbt_r2: +r2.toFixed(3),
+    vbt_points: n,
+  };
+}
+
+// Composite YBT normalizado por la longitud de pierna. La asimetría se calcula
+// respecto al lado con mejor composite (0% = simetría perfecta).
+function ybtProfile(t) {
+  const limb = num(t.ybt_limb);
+  if (!(limb > 0)) return null;
+  const composites = ['d', 'i'].map((side) => {
+    const reaches = ['ant', 'pl', 'pm'].map((k) => num(t[`ybt_${k}_${side}`]));
+    return reaches.some((v) => v == null) ? null : (reaches.reduce((a, b) => a + b, 0) / (3 * limb)) * 100;
+  });
+  if (composites.some((v) => v == null)) return null;
+  const [right, left] = composites;
+  const higher = Math.max(right, left);
+  return {
+    ybt_composite_d: +right.toFixed(1),
+    ybt_composite_i: +left.toFixed(1),
+    ybt_asymmetry_pct: +(higher > 0 ? (Math.abs(right - left) / higher) * 100 : 0).toFixed(1),
+    ybt_lower_side: right < left ? 'd' : 'i',
+  };
 }
 
 function scoreRendimiento(tests, testsJson, vbt, user, weightKg) {
@@ -382,7 +453,7 @@ function scoreRendimiento(tests, testsJson, vbt, user, weightKg) {
     const o = tj.cod && tj.cod[side];
     if (o && num(o.t) != null && o.valido !== false) codT.push(num(o.t));
   }
-  if (codT.length) axes['Agilidad / COD'] = linInv(Math.min(...codT), 4, 8);
+  if (codT.length) axes['Agilidad / COD'] = linInv(Math.min(...codT), 8, 4);
 
 // Fuerza-velocidad: potencia a partir de la pendiente carga-velocidad de
   // todos los ejercicios registrados. Cada ejercicio con varias cargas/velocidades.
@@ -409,6 +480,23 @@ function scoreRendimiento(tests, testsJson, vbt, user, weightKg) {
   }
 
   if (sprintMs != null) extra.sprint_ms = +sprintMs.toFixed(2);
+
+  const vbtInfo = vbtProfile(vbt);
+  if (vbtInfo) {
+    Object.assign(extra, vbtInfo);
+    if (axes['Potencia (carga-velocidad)'] == null) {
+      axes['Potencia (carga-velocidad)'] = lin(vbtInfo.v0_ms, 0.3, 1.8);
+    }
+  }
+
+  const ybtInfo = ybtProfile(t);
+  if (ybtInfo) {
+    Object.assign(extra, ybtInfo);
+    if (axes['Equilibrio / YBT'] == null) {
+      const worst = Math.min(ybtInfo.ybt_composite_d, ybtInfo.ybt_composite_i);
+      axes['Equilibrio / YBT'] = lin(worst, 50, 120);
+    }
+  }
 
   return { axes, extra: { ...fvInfo, ...extra } };
 }

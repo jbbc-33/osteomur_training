@@ -113,6 +113,37 @@ Si Gmail no está configurado, la app sigue funcionando: no se envían correos (
 | `MAIL_FROM` | `OSTEOMUR Training <GMAIL_USER>` | Remitente de los correos |
 | `PUBLIC_BASE_URL` | — | URL pública usada en los enlaces de recuperación y de los avisos |
 | `MAIL_OUTBOX_ONLY` | — | `1` desactiva el envío real (tests) |
+| `ALLOWED_ORIGINS` | — | Orígenes adicionales permitidos por CORS, separados por comas (la app nativa y `localhost` ya están permitidos) |
+| `TRUST_PROXY` | `1` en producción, `loopback` en local | Confianza en `X-Forwarded-*` (`true`, `false` o número de proxies) para obtener la IP real tras Railway/nginx |
+| `JWT_EXPIRES_IN` | `7d` | Duración de la sesión JWT |
+| `JWT_ISSUER` | `osteomur-training` | Emisor (`iss`) obligatorio en los tokens |
+| `JWT_AUDIENCE` | `osteomur-app` | Audiencia (`aud`) obligatoria en los tokens |
+| `FORCE_HTTPS` | — | `1` redirige a HTTPS todo lo que no sea `/api/health` |
+| `LOGIN_MAX_FAILURES` | `8` | Fallos de login por IP+email antes de bloquear |
+| `LOGIN_FAIL_WINDOW_MS` | `900000` | Ventana (15 min) en la que se cuentan los fallos |
+| `LOGIN_BLOCK_MS` | `900000` | Duración del bloqueo (15 min) |
+| `LOGIN_MAX_IP_FAILURES` | `40` | Fallos totales por IP antes de bloquear |
+| `LOGIN_RATE_MAX` | `30` | Peticiones de login por IP cada 15 min |
+| `REGISTER_RATE_MAX` | `20` | Registros por IP cada hora |
+| `RECOVER_RATE_MAX` | `10` | Solicitudes de recuperación por IP cada 15 min |
+| `SENSITIVE_RATE_MAX` | `20` | Cambios de contraseña/reset por IP cada 15 min |
+| `API_RATE_MAX` | `600` | Peticiones generales al API por IP y minuto (`/api/health` exento) |
+| `JSON_BODY_LIMIT` | `4mb` | Tamaño máximo del cuerpo JSON |
+| `KEEP_ALIVE_TIMEOUT_MS` | `65000` | `keepAliveTimeout` del servidor HTTP |
+| `HEADERS_TIMEOUT_MS` | `70000` | Tiempo máximo para recibir cabeceras |
+| `REQUEST_TIMEOUT_MS` | `60000` | Tiempo máximo de una petición completa |
+
+### Seguridad
+
+- **Contraseñas**: mínimo 8 caracteres; se guardan solo como hash bcrypt. Cada cambio (propio, asignado por el entrenador o por recuperación) incrementa `users.token_version` e invalida todas las sesiones anteriores.
+- **Sesiones JWT**: algoritmo HS256, emisor y audiencia verificados, caducidad configurable y comprobación de `token_version` en cada petición. Existe `POST /api/auth/logout-all` para cerrar todas las sesiones.
+- **Tiempo real**: el JWT nunca viaja en la URL. El cliente pide un ticket efímero de 90 s (`GET /api/auth/events-ticket`) y lo usa en `/api/events`; al reconectar pide uno nuevo.
+- **Fuerza bruta**: bloqueo temporal tras 8 fallos por IP+email (40 por IP) y límites de peticiones en login, registro, recuperación y cambios de contraseña.
+- **Cabeceras**: CSP sin scripts inline (`script-src 'self'`), `frame-ancestors 'none'`, `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Permissions-Policy` restrictiva y HSTS cuando se sirve por HTTPS. El API se envía con `Cache-Control: no-store`.
+- **CORS**: lista blanca (mismo host, orígenes Capacitor, `localhost` en desarrollo y `ALLOWED_ORIGINS`); un origen externo recibe `403`.
+- **Entradas y salidas**: validación y normalización en el servidor; los datos de usuario se escapan antes de insertarse en HTML, tanto en la API de informes como en el frontend.
+- **Secretos**: el secreto JWT se guarda en un fichero persistente con permisos restringidos (no se lee de una variable de entorno); si el fichero no existe o es débil, se regenera automáticamente.
+- **Errores**: las respuestas 500 no muestran trazas ni detalles internos y llevan `X-Request-Id` para correlacionar con los logs.
 
 ---
 
@@ -134,14 +165,19 @@ Si Gmail no está configurado, la app sigue funcionando: no se envían correos (
 │   ├── mailer.js              # Envío por Gmail SMTP (nodemailer) con outbox de respaldo
 │   ├── notifications.js       # Scheduler + Web Push (VAPID)
 │   └── reports.js             # Generador de informes HTML (imprimibles/PDF)
-├── middleware/auth.js         # JWT
+├── middleware/
+│   ├── auth.js                # JWT, tickets SSE y token_version
+│   ├── jwt-secret.js          # Secreto persistente, emisor/audiencia/TTL
+│   ├── rate-limit.js          # Límites por IP y bloqueo de fuerza bruta
+│   ├── security.js            # Cabeceras, CSP, CORS y X-Request-Id
+│   └── validate.js            # Validación/limpieza de entradas
 ├── public/
 │   ├── index.html             # Login / registro / recuperación
 │   ├── reset-password.html    # Formulario de nueva contraseña (enlace de Gmail)
 │   ├── client.html            # Vista del cliente
 │   ├── trainer.html           # Panel del entrenador
 │   ├── sw.js                  # Service Worker (Web Push / PWA)
-│   └── css/ js/               # Estilos y lógica
+│   └── css/ js/               # Estilos y lógica (sin scripts inline)
 └── test-api.js                # Suite E2E de la API
 ```
 
@@ -151,7 +187,9 @@ Si Gmail no está configurado, la app sigue funcionando: no se envían correos (
 npm test
 ```
 
-Ejecuta 75 comprobaciones end-to-end: autenticación, aforo (5ª persona bloqueada), reserva/cancelación con devolución de crédito, clientes sin créditos, asistencia, ficha de sesión, bonos configurables (CRUD), coste por sesión, valoración + informe automático, panel financiero, plantilla semanal y clases manuales (crear/cancelar/eliminar), ajuste libre de créditos, **nutrición semanal (guardar/ver/copiar)**, **plan de entrenamiento**, baja/reactivación de cuentas y servido de estáticos.
+Ejecuta más de 160 comprobaciones end-to-end: autenticación, aforo (5ª persona bloqueada), reserva/cancelación con devolución de crédito, clientes sin créditos, asistencia, ficha de sesión, bonos configurables (CRUD), coste por sesión, valoración + informe automático, panel financiero, plantilla semanal y clases manuales (crear/cancelar/eliminar), ajuste libre de créditos, **nutrición semanal (guardar/ver/copiar)**, **plan de entrenamiento**, baja/reactivación de cuentas, **seguridad de cuentas (cambio/recuperación de contraseña, invalidación de sesiones, preferencias de email)** y servido de estáticos.
+
+> Los tests crean datos y modifican la base de datos. Para ejecutarlos sin tocar la base de desarrollo: define un `DATA_DIR` temporal, ejecuta `node db/seed.js` y después `npm test`. `npm run seed` y `npm run reset` borran y recrean la base.
 
 ## Roadmap sugerido
 

@@ -1,0 +1,133 @@
+/* ============================================================
+   OSTEOMUR — Informes de valoración (ventana de impresión / PDF)
+   Se carga en la ventana emergente que genera app-trainer.js y
+   app-client.js. Aquí viven los estilos responsive y de impresión
+   que garantizan que gráficas, etiquetas y tablas se vean completas.
+   ============================================================ */
+:root {
+  --report-primary: #063DA8;
+  --report-text: #1e293b;
+  --report-muted: #64748b;
+  --report-line: #e2e8f0;
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; background: #f8fafc; }
+body {
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  color: var(--report-text);
+  font-size: 15px;
+  line-height: 1.5;
+  overflow-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- Barra superior ---------- */
+.toolbar {
+  position: sticky; top: 0; z-index: 20;
+  background: var(--report-primary); color: #fff;
+  padding: 12px 20px;
+  display: flex; align-items: center; gap: 12px;
+}
+.toolbar .t-title {
+  flex: 1; min-width: 0;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+.toolbar button {
+  flex: none;
+  background: #fff; color: var(--report-primary);
+  border: none; padding: 9px 16px; border-radius: 10px;
+  font-weight: 800; font-size: 14px; font-family: inherit; cursor: pointer;
+}
+.toolbar button:hover { background: #e0ecff; }
+
+/* ---------- Documento ---------- */
+.report {
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px;
+  color: var(--report-text);
+  overflow-wrap: break-word;
+}
+.report .report-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px 24px;
+}
+.report .report-header > div { min-width: 0; }
+
+.report h2, .report h3, .report p, .report li { overflow-wrap: anywhere; }
+
+/* Todas las tablas, incluidas las anidadas, se adaptan al ancho disponible
+   y parten las palabras largas en vez de salirse del informe. */
+.report table {
+  width: 100% !important;
+  max-width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+}
+.report table table { width: 100% !important; }
+.report th, .report td {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  vertical-align: top;
+}
+
+.report img, .report svg { max-width: 100%; height: auto; }
+
+/* ---------- Gráfica + tabla de ejes ---------- */
+.report-chart-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16px;
+  margin-top: 10px;
+}
+.report-chart {
+  flex: 0 1 520px;
+  min-width: 0;
+  max-width: 100%;
+}
+.report-chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 540px;
+  margin: 0 auto;
+}
+.report-axis { flex: 1 1 260px; min-width: 0; }
+.report-axis table { margin-top: 0 !important; }
+
+/* ---------- Pantallas estrechas ---------- */
+@media (max-width: 700px) {
+  .report { padding: 16px; }
+  .report-chart,
+  .report-axis { flex: 1 1 100%; }
+  .toolbar { flex-wrap: wrap; padding: 10px 14px; }
+  .toolbar .t-title { flex: 1 1 100%; }
+}
+
+/* ---------- Impresión / Guardar como PDF ---------- */
+@media print {
+  html, body { background: #fff; }
+  .toolbar { display: none !important; }
+  .report {
+    max-width: none !important;
+    width: 100% !important;
+    padding: 0 !important;
+  }
+  .report-chart,
+  .report-axis { flex: 1 1 100%; }
+  .report-chart svg { max-width: 100%; }
+  .report h3 { break-after: avoid; page-break-after: avoid; }
+  .report table { break-inside: auto; page-break-inside: auto; }
+  .report tr { break-inside: avoid; page-break-inside: avoid; }
+  .report thead { display: table-header-group; }
+  .report img, .report svg { break-inside: avoid; page-break-inside: avoid; }
+  @page { margin: 12mm; }
+}

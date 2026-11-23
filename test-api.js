@@ -71,7 +71,8 @@ async function main() {
 
   // intentar reservar en franja llena -> 409
   const bookFull = await req('POST', '/bookings', { slot_id: slotFull.id }, token);
-  assert(bookFull.status === 409, `Aforo completo rechazado (${bookFull.status})`);
+  // Si la franja de hoy ya pasó, el servidor rechaza con 400 antes de mirar el aforo.
+  assert(bookFull.status === (slotFull.has_passed ? 400 : 409), `Aforo completo / clase pasada rechazado (${bookFull.status})`);
 
   console.log('\n== CONTROL DE AFORO: 5ª persona ==');
   const martaLogin = await req('POST', '/auth/login', { email: 'marta@demo.com', password: 'demo1234' });
@@ -80,7 +81,7 @@ async function main() {
   const fullNow = martaToday.slots.find((s) => s.is_full);
   assert(fullNow, 'Franja 17:00 de hoy llena para marta');
   const fifth = await req('POST', '/bookings', { slot_id: fullNow.id }, martaToken);
-  assert(fifth.status === 409, `5ª persona bloqueada técnicamente (${fifth.status})`);
+  assert(fifth.status === (fullNow.has_passed ? 400 : 409), `5ª persona bloqueada técnicamente (${fifth.status})`);
 
   // reservar en una franja libre de la SEMANA QUE VIENE (siempre >24h, fuera de
   // la ventana de cancelación) para que la devolución sea posible.
@@ -91,14 +92,26 @@ async function main() {
   assert(nextweek.status === 200 && nextweek.body.days.length === 7, `Semana que viene disponible (${nextStart})`);
   const futureDay = nextweek.body.days[0];
   const freeSlot = futureDay.slots.find((s) => !s.is_full && !s.has_passed);
+  const adminBookingMails = () => mailer.getOutbox().filter(
+    (m) => m.to === 'entrenador@osteomur.es' && /reserva/i.test(m.subject)
+  );
+  mailer.clearOutbox();
   const book = await req('POST', '/bookings', { slot_id: freeSlot.id }, token);
   assert(book.status === 201, `Reserva OK (${book.status})`);
+  const bookingMails = adminBookingMails();
+  assert(bookingMails.length === 1, 'La reserva avisa por email al administrador');
+  assert(bookingMails[0] && bookingMails[0].text.includes('Carlos García')
+    && bookingMails[0].text.includes('carlos@demo.com')
+    && bookingMails[0].text.includes(futureDay.date)
+    && bookingMails[0].text.includes(String(freeSlot.start_time).slice(0, 5)),
+  'El email de reserva incluye cliente, fecha y hora de la sesión');
 
   const me2 = await req('GET', '/me', null, token);
   assert(me2.body.user.credits_balance === 4, `Se descontó 1 crédito (${me2.body.user.credits_balance})`);
 
   const dup = await req('POST', '/bookings', { slot_id: freeSlot.id }, token);
   assert(dup.status === 400, 'Doble reserva en la misma franja rechazada');
+  assert(adminBookingMails().length === 1, 'Una reserva rechazada no genera otro aviso');
 
   // cancelar con devolución
   const myBookings = await req('GET', '/my-bookings', null, token);
@@ -121,8 +134,10 @@ async function main() {
   const pedroToken = pedroLogin.body.token;
   const futureDay2 = nextweek.body.days[1];
   const freeSlot2 = futureDay2.slots.find((s) => !s.is_full && !s.has_passed);
+  mailer.clearOutbox();
   const noCredits = await req('POST', '/bookings', { slot_id: freeSlot2.id }, pedroToken);
   assert(noCredits.status === 400, `Sin créditos rechazado (${noCredits.status})`);
+  assert(adminBookingMails().length === 0, 'Una reserva sin créditos no avisa al administrador');
 
   console.log('\n== FLUJO: ENTRENADOR ==');
   const tLogin = await req('POST', '/auth/login', { email: 'entrenador@osteomur.es', password: 'demo1234' });
@@ -241,6 +256,97 @@ async function main() {
   // overview financiero
   const ov = await req('GET', '/trainer/overview', null, tToken);
   assert(ov.status === 200 && ov.body.revenue_month > 0, `Panel financiero: ingresos mes ${ov.body.revenue_month}€`);
+
+  console.log('\n== FACTURACIÓN: ÚLTIMOS PAGOS ==');
+  const payAll = await req('GET', '/trainer/payments', null, tToken);
+  assert(payAll.status === 200 && Array.isArray(payAll.body.payments), 'Listado de últimos pagos disponible');
+  assert(payAll.body.payments.length <= 20, `Listado limitado a 20 pagos (${payAll.body.payments.length})`);
+  const descOk = payAll.body.payments.every((p, i, arr) => i === 0
+    || arr[i - 1].created_at > p.created_at
+    || (arr[i - 1].created_at === p.created_at && arr[i - 1].id > p.id));
+  assert(descOk, 'Pagos ordenados de más reciente a más antiguo');
+  const paySearch = await req('GET', '/trainer/payments?search=' + encodeURIComponent('pedro'), null, tToken);
+  assert(paySearch.status === 200 && paySearch.body.payments.length >= 1
+    && paySearch.body.payments.every((p) => /pedro/i.test(p.full_name)), 'Filtro de pagos por cliente');
+  const firstDate = payAll.body.payments[0].created_at.slice(0, 10);
+  const payDateRes = await req('GET', '/trainer/payments?date=' + firstDate, null, tToken);
+  assert(payDateRes.status === 200 && payDateRes.body.payments.length >= 1
+    && payDateRes.body.payments.every((p) => p.created_at.slice(0, 10) === firstDate), 'Filtro de pagos por fecha');
+  const payBadDate = await req('GET', '/trainer/payments?date=23-11-2026', null, tToken);
+  assert(payBadDate.status === 400, 'Fecha de pago inválida rechazada');
+
+  // Cliente desechable: al borrar un pago los créditos se conservan a propósito,
+  // así que no debemos alterar el saldo de los clientes usados en otros tests.
+  const pagoClient = await req('POST', '/auth/register', {
+    email: 'pago-factura@demo.com', password: 'demo1234', full_name: 'Pago Factura', age: 30, height_cm: 170,
+  });
+  assert(pagoClient.status === 201, 'Cliente de prueba para facturación creado');
+  const pagoToken = pagoClient.body.token;
+  const pagoId = testDb.prepare('SELECT id FROM users WHERE email = ?').get('pago-factura@demo.com').id;
+
+  // Crear un pago nuevo y borrarlo: solo debe desaparecer de facturación.
+  const extra = await req('POST', '/trainer/packages', { user_id: pagoId, bono_id: cuota.id }, tToken);
+  const extraId = testDb.prepare('SELECT id FROM packages WHERE user_id = ? ORDER BY id DESC LIMIT 1').get(pagoId).id;
+  assert(extra.status === 201, 'Pago de prueba creado');
+  const ovWith = await req('GET', '/trainer/overview', null, tToken);
+  const pagoWith = await req('GET', '/me', null, pagoToken);
+  const txWith = testDb.prepare('SELECT COUNT(*) AS c FROM credit_transactions WHERE user_id = ?').get(pagoId).c;
+  const walletWith = testDb.prepare('SELECT COUNT(*) AS c FROM credit_wallets WHERE user_id = ?').get(pagoId).c;
+  const payDelete = await req('DELETE', '/trainer/payments/' + extraId, null, tToken);
+  assert(payDelete.status === 200, `Eliminar pago de facturación (${payDelete.status})`);
+  const ovWithout = await req('GET', '/trainer/overview', null, tToken);
+  assert(Math.abs(ovWithout.body.revenue_month - (ovWith.body.revenue_month - Number(cuota.price_eur))) < 0.01,
+    'Borrar el pago reduce los ingresos del mes');
+  const payAfterDelete = await req('GET', '/trainer/payments?search=' + encodeURIComponent('Pago Factura'), null, tToken);
+  assert(!payAfterDelete.body.payments.some((p) => p.id === extraId), 'El pago borrado desaparece del listado');
+  assert((await req('DELETE', '/trainer/payments/' + extraId, null, tToken)).status === 404, 'Borrar un pago inexistente devuelve 404');
+  const payForbidden = await req('DELETE', '/trainer/payments/' + extraId, null, token);
+  assert(payForbidden.status === 403, 'Un cliente no puede borrar pagos');
+  const pagoAfter = await req('GET', '/me', null, pagoToken);
+  assert(pagoAfter.body.user.credits_balance === pagoWith.body.user.credits_balance, 'Borrar un pago no cambia los créditos concedidos');
+  assert(JSON.stringify(pagoAfter.body.wallets) === JSON.stringify(pagoWith.body.wallets), 'Borrar un pago no cambia las carteras');
+  assert(testDb.prepare('SELECT COUNT(*) AS c FROM credit_transactions WHERE user_id = ?').get(pagoId).c === txWith,
+    'Borrar un pago no borra transacciones de crédito');
+  assert(testDb.prepare('SELECT COUNT(*) AS c FROM credit_wallets WHERE user_id = ?').get(pagoId).c === walletWith,
+    'Borrar un pago no borra carteras de bono');
+
+  console.log('\n== SESIONES DIRIGIDAS ==');
+  const dirTime = '13:17';
+  const dirTpl = await req('POST', '/trainer/templates', {
+    day_of_week: 7, start_time: dirTime, kind: 'dirigida', targeted_to: [carlos.id, 0, null],
+  }, tToken);
+  assert(dirTpl.status === 201 && dirTpl.body.template.kind === 'dirigida', 'Plantilla dirigida creada');
+  const dirTplIds = JSON.parse(dirTpl.body.template.targeted_to || '[]');
+  assert(dirTplIds.length === 1 && dirTplIds[0] === carlos.id, 'IDs inválidos filtrados en la plantilla dirigida');
+  const dirDate = new Date(Date.now() + 30 * 864e5).toISOString().slice(0, 10);
+  const dirSlot = await req('POST', '/trainer/slots', {
+    date: dirDate, start_time: dirTime, kind: 'dirigida', targeted_to: [carlos.id],
+  }, tToken);
+  assert(dirSlot.status === 201, `Clase dirigida creada (${dirSlot.status})`);
+  const dirDay = await req('GET', '/trainer/day?date=' + dirDate, null, tToken);
+  const dirFound = dirDay.body.slots.find((s) => s.start_time === dirTime);
+  assert(dirFound && dirFound.kind === 'dirigida' && dirFound.targeted
+    && dirFound.targeted.some((t) => t.user_id === carlos.id), 'El día expone los clientes invitados a la clase dirigida');
+  const themeClear = await req('PUT', '/trainer/slots/' + dirFound.slot_id, {
+    start_time: dirTime, duration_minutes: 60, capacity: 4, credit_cost: 1,
+    theme: null, exercises: null, kind: 'dirigida', targeted_to: [carlos.id],
+  }, tToken);
+  assert(themeClear.status === 200, `Editar clase dirigida (${themeClear.status})`);
+  const dirDay2 = await req('GET', '/trainer/day?date=' + dirDate, null, tToken);
+  const dirEdited = dirDay2.body.slots.find((s) => s.start_time === dirTime);
+  assert(dirEdited && dirEdited.theme === null, 'Editar sin temática no guarda el texto "null"');
+  const outsiderBook = await req('POST', '/bookings', { slot_id: dirFound.slot_id }, pedroToken);
+  assert(outsiderBook.status === 403, `Cliente no invitado no puede reservar (${outsiderBook.status})`);
+  const invitedBook = await req('POST', '/bookings', { slot_id: dirFound.slot_id }, token);
+  assert(invitedBook.status === 201, `Cliente invitado puede reservar (${invitedBook.status})`);
+  if (invitedBook.status === 201) {
+    const cancelBook = await req('POST', `/bookings/${invitedBook.body.booking_id}/cancel`, {}, token);
+    assert(cancelBook.status === 200, 'Reserva de prueba cancelada');
+  }
+  const pagedClients = await req('GET', '/trainer/clients?limit=8&offset=0&search=ana', null, tToken);
+  assert(pagedClients.status === 200 && Array.isArray(pagedClients.body.clients)
+    && pagedClients.body.clients.length <= 8 && pagedClients.body.total >= 1,
+  'Selector de clientes con paginación y búsqueda');
 
   console.log('\n== NUEVAS FUNCIONES: CLASES, CRÉDITOS, NUTRICIÓN Y BAJAS ==');
   const tpl = await req('GET', '/trainer/templates', null, tToken);
@@ -432,6 +538,7 @@ async function main() {
   // desglose global de carteras para el entrenador
   const walletsAll = await req('GET', '/trainer/wallets', null, tToken);
   assert(walletsAll.status === 200 && walletsAll.body.wallets.length >= 1 && walletsAll.body.wallets[0].full_name, 'Desglose de carteras por bono (entrenador)');
+  assert(walletsAll.body.wallets.some((w) => w.source === 'bono' && w.bono_name), 'Las carteras de bono incluyen el nombre del bono para filtrar');
 
   // pedro: 8 del bono (cuota) + 2 directos del entrenador (manual, sin caducidad)
   const addManual = await req('POST', '/trainer/credits', { user_id: pedro.id, amount: 2, reason: 'Regalo' }, tToken);
@@ -475,6 +582,8 @@ async function main() {
   assert(react.status === 200, 'Reactivar cliente');
   const relogin2 = await req('POST', '/auth/login', { email: 'carlos@demo.com', password: 'demo1234' });
   assert(relogin2.status === 200, 'Cliente reactivado puede iniciar sesión');
+  // La baja invalidó el token original (token_version): se usa el de este login.
+  const carlosTokenAfterReact = relogin2.body.token;
 
   console.log('\n== ALERTAS Y AVISOS (notificaciones del cliente) ==');
   const { runClientAlerts } = require('./services/notifications');
@@ -501,15 +610,15 @@ async function main() {
   // Alerta 1: créditos próximos a agotarse (saldo <= 2), sin duplicados en 48h
   testDb.prepare('UPDATE credit_wallets SET credits_remaining = 0 WHERE user_id = ?').run(carlos.id);
   runClientAlerts();
-  let lowNotif = await req('GET', '/notifications', null, token);
+  let lowNotif = await req('GET', '/notifications', null, carlosTokenAfterReact);
   assert(lowNotif.body.notifications.filter((n) => n.type === 'creditos_bajos').length === 1, 'Alerta de créditos bajos creada al detectarse (<=2)');
   assert(lowNotif.body.notifications.find((n) => n.type === 'creditos_bajos').kind === 'alerta', 'La alerta de créditos bajos es tipo "alerta"');
   runClientAlerts();
-  lowNotif = await req('GET', '/notifications', null, token);
+  lowNotif = await req('GET', '/notifications', null, carlosTokenAfterReact);
   assert(lowNotif.body.notifications.filter((n) => n.type === 'creditos_bajos').length === 1, 'Cooldown de 2 días: no se repite de inmediato');
   testDb.prepare("UPDATE notifications SET created_at = datetime('now', '-3 days') WHERE user_id = ? AND type = 'creditos_bajos'").run(carlos.id);
   runClientAlerts();
-  lowNotif = await req('GET', '/notifications', null, token);
+  lowNotif = await req('GET', '/notifications', null, carlosTokenAfterReact);
   assert(lowNotif.body.notifications.filter((n) => n.type === 'creditos_bajos').length === 2, 'Pasado el cooldown se vuelve a avisar');
 
   // Alerta 2: único bono activo que caduca en <= 5 días
@@ -556,6 +665,8 @@ async function main() {
   const afterSelfOld = await req('POST', '/auth/login', { email: 'carlos@demo.com', password: 'ClaveAdmin1' });
   const afterSelfNew = await req('POST', '/auth/login', { email: 'carlos@demo.com', password: 'ClavePropia2' });
   assert(afterSelfOld.status === 401 && afterSelfNew.status === 200, 'Tras el cambio solo funciona la contraseña nueva');
+  const staleSelf = await req('GET', '/me', null, carlosToken);
+  assert(staleSelf.status === 401, 'El token anterior deja de valer tras cambiar la contraseña');
 
   // 3) Recuperación por email: token de un solo uso y caducidad.
   mailer.clearOutbox();
@@ -596,7 +707,13 @@ async function main() {
   await notify(carlos.id, 'Aviso de prueba', 'Este es un aviso de prueba para comprobar el envío por email.', 'info');
   assert(mailer.getOutbox().some((m) => m.to === 'carlos@demo.com' && /Aviso de prueba/.test(m.subject)), 'Los avisos de la app llegan también por email');
 
-  const prefOff = await req('PUT', '/me', { email_notifications: false }, carlosToken);
+  // Cada cambio de contraseña invalida los tokens previos (token_version), así
+  // que hay que volver a iniciar sesión con la contraseña vigente.
+  const loginFinal5 = await req('POST', '/auth/login', { email: 'carlos@demo.com', password: 'ClaveFinal5' });
+  assert(loginFinal5.status === 200, 'Login con la contraseña vigente tras varias recuperaciones');
+  const carlosToken5 = loginFinal5.body.token;
+
+  const prefOff = await req('PUT', '/me', { email_notifications: false }, carlosToken5);
   assert(prefOff.status === 200 && prefOff.body.user.email_notifications === 0, 'El cliente puede desactivar los avisos por email');
 
   mailer.clearOutbox();
@@ -611,7 +728,11 @@ async function main() {
   const forgotMandatory = await req('POST', '/auth/forgot-password', { email: 'carlos@demo.com' });
   assert(forgotMandatory.status === 200 && mailer.getOutbox().some((m) => m.to === 'carlos@demo.com' && /recupera/i.test(m.subject)), 'La recuperación de cuenta se envía aunque los avisos estén desactivados');
 
-  const prefOn = await req('PUT', '/me', { email_notifications: true }, carlosToken);
+  const loginFinal6 = await req('POST', '/auth/login', { email: 'carlos@demo.com', password: 'ClaveFinal6' });
+  assert(loginFinal6.status === 200, 'Login con la contraseña reasignada por el entrenador');
+  const carlosToken6 = loginFinal6.body.token;
+
+  const prefOn = await req('PUT', '/me', { email_notifications: true }, carlosToken6);
   assert(prefOn.status === 200 && prefOn.body.user.email_notifications === 1, 'El cliente puede reactivar los avisos por email');
 
   console.log('\n== FRONTEND (ficheros estáticos) ==');

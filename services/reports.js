@@ -58,9 +58,9 @@ function generateCompositionReport(userId, compositionId) {
 
   const title = `Informe de valoración — ${user.full_name} (${fmtDate(comp.measured_on)})`;
   const html = `
-<div class="report" style="font-family: system-ui, Arial, sans-serif; max-width: 720px; margin: 0 auto; color: #1e293b; padding: 24px;">
-  <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:3px solid #063DA8; padding-bottom:16px;">
-    <div>
+<div class="report" style="font-family: system-ui, Arial, sans-serif; width:100%; max-width: 860px; margin: 0 auto; color: #1e293b; padding: 24px; box-sizing:border-box;">
+  <div class="report-header" style="display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-start; gap:10px 24px; border-bottom:3px solid #063DA8; padding-bottom:16px;">
+    <div style="min-width:0;">
       <div style="font-size:22px; font-weight:800; color:#063DA8;">OSTEOMUR</div>
       <div style="font-size:13px; color:#64748b;">Entrenamiento personal · Valoración de composición corporal</div>
     </div>
@@ -70,8 +70,8 @@ function generateCompositionReport(userId, compositionId) {
     </div>
   </div>
 
-  <h2 style="margin:20px 0 4px; font-size:20px;">${user.full_name}</h2>
-  <p style="margin:0 0 16px; color:#64748b; font-size:13px;">Deporte: ${user.sport || '—'}</p>
+  <h2 style="margin:20px 0 4px; font-size:20px;">${esc(user.full_name)}</h2>
+  <p style="margin:0 0 16px; color:#64748b; font-size:13px;">Deporte: ${esc(user.sport || '—')}</p>
 
   <h3 style="font-size:15px; color:#063DA8;">Evolución vs valoración anterior${prev ? ` (${fmtDate(prev.measured_on)})` : ''}</h3>
   <table style="width:100%; border-collapse:collapse; font-size:13px;">
@@ -88,7 +88,7 @@ function generateCompositionReport(userId, compositionId) {
 
   <h3 style="font-size:15px; color:#063DA8; margin-top:24px;">Resumen</h3>
   <ul style="font-size:13px; padding-left:18px; line-height:1.7;">${insights.map((i) => `<li>${i}</li>`).join('')}</ul>
-  ${comp.notes ? `<p style="font-size:13px; background:#f8fafc; border-left:3px solid #063DA8; padding:10px 12px;">Notas: ${comp.notes}</p>` : ''}
+  ${comp.notes ? `<p style="font-size:13px; background:#f8fafc; border-left:3px solid #063DA8; padding:10px 12px;">Notas: ${esc(comp.notes)}</p>` : ''}
 
   <div style="margin-top:28px; border-top:1px solid #e2e8f0; padding-top:12px; font-size:11px; color:#94a3b8;">
     Informe generado automáticamente por OSTEOMUR.
@@ -162,7 +162,12 @@ const TEST_LABELS = {
 };
 
 function esc(s) {
-  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 // Velocidades del protocolo Bruce Modificado en formato español (2,7 km/h).
 function bruceNumTxt(v) {
@@ -186,11 +191,50 @@ function radarSvg(axesObj) {
     const chips = entries.map(([k, v]) => `<b>${k}</b>: ${v}`).join(' · ') || 'Sin resultados';
     return `<p style="font-size:13px;">${chips}</p>`;
   }
-  const size = 320;
-  const cx = size / 2;
-  const cy = size / 2;
-  const R = 120;
+
+  // El radar se dimensiona a partir de las etiquetas para que ningún texto
+  // quede recortado por el viewBox. Las etiquetas largas se dividen en varias
+  // líneas y el valor se coloca justo debajo, fuera del polígono.
   const n = entries.length;
+  const R = 104;          // radio del polígono
+  const labelGap = 26;    // separación entre polígono y etiquetas
+  const lineH = 17;       // altura de línea de las etiquetas
+  const valueH = 22;      // espacio reservado para el valor bajo la etiqueta
+  const fontLabel = 11.5;
+  const fontValue = 12.5;
+  const maxChars = 16;
+
+  const wrap = (text, max) => {
+    const words = String(text == null ? '' : text).split(/\s+/).filter(Boolean);
+    const lines = [];
+    let line = '';
+    for (const word of words) {
+      const candidate = line ? `${line} ${word}` : word;
+      if (candidate.length <= max || !line) line = candidate;
+      else { lines.push(line); line = word; }
+    }
+    if (line) lines.push(line);
+    const out = [];
+    for (const l of lines) {
+      let rest = l;
+      while (rest.length > max) { out.push(rest.slice(0, max)); rest = rest.slice(max); }
+      if (rest) out.push(rest);
+    }
+    return out.length ? out : [''];
+  };
+
+  const labelLines = entries.map(([k]) => wrap(k, maxChars));
+  const maxLines = Math.max(...labelLines.map((l) => l.length));
+  const blockH = maxLines * lineH + valueH;
+  const maxLineChars = Math.max(...labelLines.map((l) => Math.max(...l.map((x) => x.length))));
+  const charW = 6.2; // ancho aproximado de un carácter a 11,5 px en negrita
+  const halfW = Math.ceil(R + labelGap + maxLineChars * charW + 10);
+  const halfH = Math.ceil(R + labelGap + blockH + 10);
+  const width = halfW * 2;
+  const height = halfH * 2;
+  const cx = halfW;
+  const cy = halfH;
+
   const pt = (i, r) => {
     const a = (Math.PI * 2 * i) / n - Math.PI / 2;
     return `${(cx + r * Math.cos(a)).toFixed(1)},${(cy + r * Math.sin(a)).toFixed(1)}`;
@@ -203,12 +247,23 @@ function radarSvg(axesObj) {
   const dataPts = entries.map(([k, v], i) => pt(i, (R * Math.max(2, Math.min(100, v))) / 100)).join(' ');
   const labels = entries.map(([k, v], i) => {
     const a = (Math.PI * 2 * i) / n - Math.PI / 2;
-    const lx = cx + (R + 34) * Math.cos(a);
-    const ly = cy + (R + 34) * Math.sin(a);
-    const anchor = Math.abs(Math.cos(a)) < 0.3 ? 'middle' : Math.cos(a) > 0 ? 'start' : 'end';
-    return `<text x="${lx.toFixed(1)}" y="${(ly + 4).toFixed(1)}" text-anchor="${anchor}" font-size="12" font-weight="700" fill="#334155">${esc(k)}<tspan x="${lx.toFixed(1)}" dy="15" font-size="13" fill="#063DA8">${v}</tspan></text>`;
+    const cos = Math.cos(a);
+    const sin = Math.sin(a);
+    const lx = cx + (R + labelGap) * cos;
+    const ly = cy + (R + labelGap) * sin;
+    const anchor = Math.abs(cos) < 0.3 ? 'middle' : cos > 0 ? 'start' : 'end';
+    const blockTop = sin < -0.4
+      ? ly - 8 - blockH
+      : sin > 0.4
+        ? ly + 8
+        : ly - blockH / 2;
+    const parts = labelLines[i].map((line, idx) =>
+      `<text x="${lx.toFixed(1)}" y="${(blockTop + lineH * (idx + 1)).toFixed(1)}" text-anchor="${anchor}" font-size="${fontLabel}" font-weight="700" fill="#334155">${esc(line)}</text>`);
+    parts.push(`<text x="${lx.toFixed(1)}" y="${(blockTop + blockH - 4).toFixed(1)}" text-anchor="${anchor}" font-size="${fontValue}" font-weight="800" fill="#063DA8">${v}</text>`);
+    return parts.join('');
   }).join('');
-  return `<svg width="${size}" height="${size + 30}" viewBox="0 0 ${size} ${size + 30}">
+
+  return `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Gráfico radar de resultados normalizados" style="display:block;width:100%;height:auto;max-width:${width}px;margin:0 auto;">
     ${rings}${spokes}
     <polygon points="${dataPts}" fill="rgba(6,61,168,.22)" stroke="#063DA8" stroke-width="2.5" stroke-linejoin="round"/>
     ${labels}
@@ -336,7 +391,7 @@ function generateAssessmentReport(assessmentId) {
     || ebbJson.warmup_hr_end != null || ebbJson.rpe_end != null;
   if (eager && ebbHasData) {
     const rows = [];
-    const row = (label, val) => (val !== undefined && val !== '' && val != null ? `<tr><td style="padding:6px 8px;border:1px solid #e2e8f0;">${label}</td><td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:right;font-weight:700;">${val}</td></tr>` : '');
+    const row = (label, val) => (val !== undefined && val !== '' && val != null ? `<tr><td style="padding:6px 8px;border:1px solid #e2e8f0;">${esc(label)}</td><td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:right;font-weight:700;">${esc(val)}</td></tr>` : '');
     const ebbVo2 = numV(ebbJson.vo2max_estimated);
     const ebbStageHr = numV(ebbJson.stage_hr_min3 != null && ebbJson.stage_hr_min3 !== '' ? ebbJson.stage_hr_min3 : ebbJson.steady_state_hr);
     rows.push(row('VO2max estimado', ebbVo2 != null ? `${ebbVo2} ml/kg/min` : (numV(ebbJson.speed_mph) != null && ebbStageHr != null ? 'Estimación no calculable (fuera de rango validado o datos incompletos)' : null)));
@@ -375,7 +430,7 @@ function generateAssessmentReport(assessmentId) {
           .map((ra) => `${ra.s} s (${ra.valido === false ? 'no válido' : 'válido'})${ra.sint ? ` · síntomas ${ra.sint}` : ''}`).join(' · ')
         : '';
 
-      const row = (label, val) => (val !== undefined && val !== '' && val != null ? `<tr><td style="padding:6px 8px;border:1px solid #e2e8f0;">${label}</td><td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:right;font-weight:700;">${val}</td></tr>` : '');
+      const row = (label, val) => (val !== undefined && val !== '' && val != null ? `<tr><td style="padding:6px 8px;border:1px solid #e2e8f0;">${esc(label)}</td><td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:right;font-weight:700;">${esc(val)}</td></tr>` : '');
 
       if (aData.sintomas && (aData.sintomas.dolor != null || aData.sintomas.localizacion)) {
         rows.push(row('Dolor / síntomas (EVA)', aData.sintomas.dolor != null ? `${aData.sintomas.dolor}/10` : null));
@@ -487,7 +542,7 @@ function generateAssessmentReport(assessmentId) {
       const filtered = rows.filter((r) => r && !/^\s*$/.test(r));
       if (filtered.length) {
         const parteLabel = { rodilla: 'Rodilla', tobillo: 'Tobillo', hombro: 'Hombro' }[aParte] || aParte;
-        complexRows.push(`<h3 style="font-size:15px; color:#063DA8; margin-top:20px;">Batería de readaptación — ${parteLabel}</h3>
+        complexRows.push(`<h3 style="font-size:15px; color:#063DA8; margin-top:20px;">Batería de readaptación — ${esc(parteLabel)}</h3>
           <table style="width:100%; border-collapse:collapse; font-size:13px;"><tbody>${filtered.join('')}</tbody></table>`);
       }
     }
@@ -497,7 +552,7 @@ function generateAssessmentReport(assessmentId) {
   const rend = (testsJson.rendimiento) || {};
   if (rend && Object.keys(rend).length) {
     const rows = [];
-    const row = (label, val) => (val !== undefined && val !== '' && val != null ? `<tr><td style="padding:6px 8px;border:1px solid #e2e8f0;">${label}</td><td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:right;font-weight:700;">${val}</td></tr>` : '');
+    const row = (label, val) => (val !== undefined && val !== '' && val != null ? `<tr><td style="padding:6px 8px;border:1px solid #e2e8f0;">${esc(label)}</td><td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:right;font-weight:700;">${esc(val)}</td></tr>` : '');
     const attTxt = (list) => Array.isArray(list) ? list.filter((a) => a && a.cm !== '' && a.cm != null).map((a) => `${a.cm} cm (${a.valido === false ? 'no válido' : 'válido'})`).join(' · ') : '';
     const hhdTxt = (list) => Array.isArray(list) ? list.filter((a) => a && a.v !== '' && a.v != null).map((a) => `${a.v} ${rend.hhd.unidad || 'N'}`).join(' · ') : '';
     if (rend.cmj && Array.isArray(rend.cmj.intentos)) {
@@ -533,12 +588,12 @@ function generateAssessmentReport(assessmentId) {
       const exs = (Array.isArray(rend.fuerza_velocidad.ejercicios) ? rend.fuerza_velocidad.ejercicios : [])
         .filter((ex) => ex && Array.isArray(ex.rows) && ex.rows.some((r) => r.carga !== '' || r.velocidad !== ''))
         .map((ex) => {
-          const rowsTxt = ex.rows.filter((r) => r.carga !== '' || r.velocidad !== '').map((r) => `<tr><td style="padding:6px 8px;border:1px solid #e2e8f0;">${r.carga || '—'}</td><td style="padding:6px 8px;border:1px solid #e2e8f0;">${r.velocidad || '—'}</td></tr>`).join('');
+          const rowsTxt = ex.rows.filter((r) => r.carga !== '' || r.velocidad !== '').map((r) => `<tr><td style="padding:6px 8px;border:1px solid #e2e8f0;">${esc(r.carga || '—')}</td><td style="padding:6px 8px;border:1px solid #e2e8f0;">${esc(r.velocidad || '—')}</td></tr>`).join('');
           return `${row('Perfil F-V · ejercicio', ex.nombre || '—')}<tr><td colspan="2" style="padding:0;"><table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="background:#f1f5f9;"><th style="padding:4px;border:1px solid #e2e8f0;">Carga (kg)</th><th style="padding:4px;border:1px solid #e2e8f0;">Velocidad (m/s)</th></tr></thead><tbody>${rowsTxt}</tbody></table></td></tr>`;
         });
       // Formato antiguo (un único ejercicio en "rows")
       if (!exs.length && Array.isArray(rend.fuerza_velocidad.rows) && rend.fuerza_velocidad.rows.some((r) => r.carga !== '')) {
-        const rowsOld = rend.fuerza_velocidad.rows.filter((r) => r.carga !== '' || r.velocidad !== '').map((r) => `<tr><td style="padding:6px 8px;border:1px solid #e2e8f0;">${r.carga || '—'}</td><td style="padding:6px 8px;border:1px solid #e2e8f0;">${r.velocidad || '—'}</td></tr>`).join('');
+        const rowsOld = rend.fuerza_velocidad.rows.filter((r) => r.carga !== '' || r.velocidad !== '').map((r) => `<tr><td style="padding:6px 8px;border:1px solid #e2e8f0;">${esc(r.carga || '—')}</td><td style="padding:6px 8px;border:1px solid #e2e8f0;">${esc(r.velocidad || '—')}</td></tr>`).join('');
         exs.push(`${row('Perfil F-V · ejercicio', rend.fuerza_velocidad.ejercicio)}<tr><td colspan="2" style="padding:0;"><table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="background:#f1f5f9;"><th style="padding:4px;border:1px solid #e2e8f0;">Carga (kg)</th><th style="padding:4px;border:1px solid #e2e8f0;">Velocidad (m/s)</th></tr></thead><tbody>${rowsOld}</tbody></table></td></tr>`);
       }
       exs.forEach((s) => rows.push(s));
@@ -589,7 +644,7 @@ function generateAssessmentReport(assessmentId) {
   const amData = (testsJson.adulto_mayor) || {};
   if (amData && Object.keys(amData).length) {
     const rows = [];
-    const row = (label, val) => (val !== undefined && val !== '' && val != null ? `<tr><td style="padding:6px 8px;border:1px solid #e2e8f0;">${label}</td><td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:right;font-weight:700;">${val}</td></tr>` : '');
+    const row = (label, val) => (val !== undefined && val !== '' && val != null ? `<tr><td style="padding:6px 8px;border:1px solid #e2e8f0;">${esc(label)}</td><td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:right;font-weight:700;">${esc(val)}</td></tr>` : '');
     const sideLbl = (s) => (s === 'd' ? 'Derecha' : 'Izquierda');
     const hhdTxt = (list) => Array.isArray(list) ? list.filter((a) => a && a.v !== '' && a.v != null).map((a) => `${a.v} kgf`).join(' · ') : '';
     if (amData.tug && amData.tug.elapsed) rows.push(row('TUG', `${amData.tug.elapsed.toFixed(1)} s`));
@@ -676,7 +731,7 @@ const bruceUsado = !!bruceData && (
 
   const painRows = pain.length
     ? `<h3 style="font-size:15px; color:#063DA8; margin-top:20px;">Mapa de dolor (EVA 0-10)</h3>
-       <ul style="font-size:13px; padding-left:18px; line-height:1.7;">${pain.map((p) => `<li>${esc(p.label)}${p.side ? ` (${p.side})` : ''}: <b>${p.intensity}/10</b></li>`).join('')}</ul>`
+       <ul style="font-size:13px; padding-left:18px; line-height:1.7;">${pain.map((p) => `<li>${esc(p.label)}${p.side ? ` (${esc(p.side)})` : ''}: <b>${esc(p.intensity)}/10</b></li>`).join('')}</ul>`
     : '';
 
   const axisRows = Object.entries(results.axes || {}).length
@@ -702,15 +757,15 @@ const bruceUsado = !!bruceData && (
   const tituloPerfil = PROFILE_LABELS[perfil] || perfil || 'Sin perfil';
   const title = `${baseTitulo} — ${tituloPerfil} · ${user.full_name}`;
   const html = `
-<div class="report" style="font-family: system-ui, Arial, sans-serif; max-width: 760px; margin: 0 auto; color: #1e293b; padding: 24px;">
-  <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:3px solid #063DA8; padding-bottom:16px;">
-    <div>
+<div class="report" style="font-family: system-ui, Arial, sans-serif; width:100%; max-width: 860px; margin: 0 auto; color: #1e293b; padding: 24px; box-sizing:border-box;">
+  <div class="report-header" style="display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-start; gap:10px 24px; border-bottom:3px solid #063DA8; padding-bottom:16px;">
+    <div style="min-width:0;">
       <div style="font-size:22px; font-weight:800; color:#063DA8;">OSTEOMUR</div>
       <div style="font-size:13px; color:#64748b;">${esc(baseTitulo)} · ${esc(tituloPerfil)}</div>
     </div>
     <div style="text-align:right; font-size:12px; color:#64748b;">
       <div>Fecha: <b>${fmtDate(a.updated_at ? a.updated_at.slice(0, 10) : a.created_at.slice(0, 10))}</b></div>
-      <div>Edad: <b>${user.age || '—'}</b> · Sexo: <b>${user.sex || '—'}</b> · Altura: <b>${user.height_cm || '—'} cm</b></div>
+      <div>Edad: <b>${user.age || '—'}</b> · Sexo: <b>${esc(user.sex || '—')}</b> · Altura: <b>${user.height_cm || '—'} cm</b></div>
     </div>
   </div>
 
@@ -725,7 +780,7 @@ const bruceUsado = !!bruceData && (
       <tr><td style="padding:6px 8px;border:1px solid #e2e8f0;">Tensión arterial</td><td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:right;font-weight:700;">${a.systolic_mmhg || '—'}/${a.diastolic_mmhg || '—'} mmHg</td></tr>
       <tr><td style="padding:6px 8px;border:1px solid #e2e8f0;">FC en reposo</td><td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:right;font-weight:700;">${a.rest_hr || '—'} ppm</td></tr>
       <tr><td style="padding:6px 8px;border:1px solid #e2e8f0;">Sueño</td><td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:right;font-weight:700;">${a.sleep_hours || '—'} h${a.sleep_quality ? ` · calidad ${a.sleep_quality}/5` : ''}</td></tr>
-      <tr><td style="padding:6px 8px;border:1px solid #e2e8f0;">Estrés</td><td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:right;font-weight:700;">${a.stress_level || '—'}</td></tr>
+      <tr><td style="padding:6px 8px;border:1px solid #e2e8f0;">Estrés</td><td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:right;font-weight:700;">${esc(a.stress_level || '—')}</td></tr>
       <tr><td style="padding:6px 8px;border:1px solid #e2e8f0;">Sedentarismo</td><td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:right;font-weight:700;">${a.sitting_hours || '—'} h/día sentado</td></tr>
     </tbody>
   </table>
@@ -739,9 +794,9 @@ const bruceUsado = !!bruceData && (
   ${complexRows.join('')}
 
   <h3 style="font-size:15px; color:#063DA8; margin-top:20px;">Resultados normalizados (0-100)</h3>
-  <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px;">
-    <div>${radarSvg(results.axes)}</div>
-    <div style="flex:1; min-width:220px;">${axisRows}</div>
+  <div class="report-chart-row">
+    <div class="report-chart">${radarSvg(results.axes)}</div>
+    <div class="report-axis">${axisRows}</div>
   </div>
 
   ${a.notes ? `<p style="font-size:13px; background:#f8fafc; border-left:3px solid #063DA8; padding:10px 12px;">Notas: ${esc(a.notes)}</p>` : ''}

@@ -80,8 +80,8 @@ function notifItemHtml(n) {
   return `<div class="notif ${isAlerta ? 'alerta' : 'aviso'} ${n.is_read ? '' : 'unread'}">
     <div class="n-ico">${icon}</div>
     <div>
-      <div class="n-title">${n.title}</div>
-      <div class="n-body">${n.body}</div>
+      <div class="n-title">${esc(n.title)}</div>
+      <div class="n-body">${esc(n.body)}</div>
       <div class="n-time">${new Date(n.created_at).toLocaleString('es-ES', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
     </div>
   </div>`;
@@ -156,13 +156,13 @@ function slotAction(s) {
 
 function slotBody(s) {
   const exChips = (s.exercises || []).length
-    ? `<div class="slot-chips">${s.exercises.map((e) => `<span class="chip chip-sm">${e}</span>`).join('')}</div>`
+    ? `<div class="slot-chips">${s.exercises.map((e) => `<span class="chip chip-sm">${esc(e)}</span>`).join('')}</div>`
     : '';
   return `<div class="slot ${s.my_booking_id ? 'my-slot' : ''} ${s.has_passed ? 'past' : ''} ${s.cancelled ? 'cancelled' : ''}">
     <div style="flex:1;min-width:0;">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <div class="time">${s.start_time}–${s.end_time}</div>
-        ${s.theme ? `<span class="chip chip-sm chip-theme">${s.theme}</span>` : ''}
+        ${s.theme ? `<span class="chip chip-sm chip-theme">${esc(s.theme)}</span>` : ''}
         ${s.kind === 'dirigida' ? '<span class="chip chip-sm chip-warn">Solo invitados</span>' : ''}
         <span class="chip chip-sm chip-cost">${s.credit_cost} crédito${s.credit_cost > 1 ? 's' : ''}</span>
       </div>
@@ -796,9 +796,9 @@ function trainingPlanHtml(data) {
     .map(
       (e) => `<div class="tpe-row">
         <div style="flex:1;min-width:0;">
-          <b>${e.name}</b>${e.notes ? `<div class="small muted">${e.notes}</div>` : ''}
+          <b>${esc(e.name)}</b>${e.notes ? `<div class="small muted">${esc(e.notes)}</div>` : ''}
         </div>
-        <span class="chip chip-sm">${e.sets ? e.sets + ' series' : ''}${e.reps ? ' × ' + e.reps : ''}</span>
+        <span class="chip chip-sm">${e.sets ? esc(e.sets) + ' series' : ''}${e.reps ? ' × ' + esc(e.reps) : ''}</span>
         ${e.rest_sec ? `<span class="chip chip-sm">descanso ${e.rest_sec}s</span>` : ''}
       </div>`
     )
@@ -809,8 +809,8 @@ function trainingPlanHtml(data) {
   }).join('');
   const any = anyDay.length ? `<div class="section-label" style="margin-top:14px;">Cualquier día</div>${rows(anyDay)}` : '';
   return `<div class="card">
-    <h3>${tp.name || 'Plan de entrenamiento'}</h3>
-    ${tp.notes ? `<p class="muted small">${tp.notes}</p>` : ''}
+    <h3>${esc(tp.name || 'Plan de entrenamiento')}</h3>
+    ${tp.notes ? `<p class="muted small">${esc(tp.notes)}</p>` : ''}
     <div class="tpe-list">${byDay}${any}</div>
   </div>`;
 }
@@ -930,7 +930,7 @@ async function loadProgress() {
       .map(
         (r) => `<div class="report-item">
           <div>
-            <div class="ri-title">${r.title}</div>
+            <div class="ri-title">${esc(r.title)}</div>
             <div class="ri-sub">${new Date(r.created_at).toLocaleDateString('es-ES')}</div>
           </div>
           <button class="btn btn-sm btn-primary" data-report="${r.id}">
@@ -955,16 +955,16 @@ async function openReport(id) {
 
 function printHtml(title, html) {
   const w = window.open('', '_blank', 'width=900,height=800');
-  w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>${title}</title>
-    <style>@media print { .toolbar { display:none; } }
-      body{font-family:system-ui,Arial,sans-serif;margin:0;background:#f8fafc;}
-      .toolbar{position:sticky;top:0;background:#063DA8;color:#fff;padding:12px 20px;display:flex;align-items:center;gap:12px;}
-      .toolbar button{background:#fff;color:#063DA8;border:none;padding:9px 16px;border-radius:10px;font-weight:800;cursor:pointer;font-family:inherit;}
-      .toolbar .t-title{font-weight:800;flex:1;}
-    </style></head><body>
-      <div class="toolbar"><span class="t-title">${title}</span><button onclick="window.print()">Imprimir / Guardar como PDF</button></div>
+  if (!w) return;
+  w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>${esc(title)}</title>
+    <link rel="stylesheet" href="${location.origin}/css/report.css"></head><body>
+      <div class="toolbar"><span class="t-title">${esc(title)}</span><button id="btn-print-report" type="button">Imprimir / Guardar como PDF</button></div>
       ${html}</body></html>`);
   w.document.close();
+  const btn = w.document.getElementById('btn-print-report');
+  if (btn) btn.addEventListener('click', () => w.print());
 }
 
 // ---------- PERFIL (modal) ----------
@@ -976,7 +976,7 @@ function walletBreakdownHTML(wallets) {
     <tbody>${active
       .map(
         (w) => `<tr>
-          <td>${w.source === 'manual' ? 'Créditos del entrenador' : (w.label || w.source)}</td>
+          <td>${w.source === 'manual' ? 'Créditos del entrenador' : esc(w.label || w.source)}</td>
           <td><b>${w.credits_remaining}</b></td>
           <td>${w.expires_at ? Dates.fmtExpiry(w.expires_at) : '<span class="muted">sin caducidad</span>'}</td>
         </tr>`
@@ -999,8 +999,8 @@ async function openProfile() {
       <div class="profile-head">
         <span id="pf-avatar">${avatarHtml(u, 56)}</span>
         <div>
-          <h3 style="margin:0;">${u.full_name || ''}</h3>
-          <p class="muted small" style="margin:2px 0 0;">${u.email}</p>
+          <h3 style="margin:0;">${esc(u.full_name || '')}</h3>
+          <p class="muted small" style="margin:2px 0 0;">${esc(u.email)}</p>
         </div>
       </div>
       <div class="stat-row" style="margin-bottom:16px;">
@@ -1013,22 +1013,22 @@ async function openProfile() {
         <div id="pf-wallets">${walletBreakdownHTML(me.wallets)}</div>
       </div>
       <div class="field"><label>Foto de perfil</label><input type="file" id="pf-avatar-upload" accept="image/*"></div>
-      <div class="field"><label>Nombre completo</label><input id="pf-name" value="${u.full_name || ''}"></div>
-      <div class="field"><label>Teléfono</label><input id="pf-phone" value="${u.phone || ''}"></div>
+      <div class="field"><label>Nombre completo</label><input id="pf-name" value="${esc(u.full_name || '')}"></div>
+      <div class="field"><label>Teléfono</label><input id="pf-phone" value="${esc(u.phone || '')}"></div>
       <div class="form-grid-3">
-        <div class="field"><label>Edad</label><input id="pf-age" type="number" value="${u.age || ''}"></div>
-        <div class="field"><label>Altura (cm)</label><input id="pf-height" type="number" value="${u.height_cm || ''}"></div>
-        <div class="field"><label>Deporte</label><input id="pf-sport" value="${u.sport || ''}"></div>
+        <div class="field"><label>Edad</label><input id="pf-age" type="number" value="${esc(u.age || '')}"></div>
+        <div class="field"><label>Altura (cm)</label><input id="pf-height" type="number" value="${esc(u.height_cm || '')}"></div>
+        <div class="field"><label>Deporte</label><input id="pf-sport" value="${esc(u.sport || '')}"></div>
       </div>
-      <div class="field"><label>Lesiones activas</label><textarea id="pf-injuries">${u.active_injuries || ''}</textarea></div>
+      <div class="field"><label>Lesiones activas</label><textarea id="pf-injuries">${esc(u.active_injuries || '')}</textarea></div>
       <button class="btn btn-primary btn-block" id="btn-save-profile">Guardar cambios</button>
       <div class="ficha-section" style="margin-top:14px;">
         <h3>Seguridad</h3>
         <p class="small muted">Cambia tu contraseña. Necesitas introducir la actual; al guardar, las anteriores dejarán de funcionar.</p>
         <div class="field"><label>Contraseña actual</label><input id="pf-current-pw" type="password" autocomplete="current-password"></div>
         <div class="form-grid-2">
-          <div class="field"><label>Nueva contraseña (mín. 6)</label><input id="pf-new-pw" type="password" minlength="6" autocomplete="new-password"></div>
-          <div class="field"><label>Repetir nueva</label><input id="pf-repeat-pw" type="password" minlength="6" autocomplete="new-password"></div>
+          <div class="field"><label>Nueva contraseña (mín. 8)</label><input id="pf-new-pw" type="password" minlength="8" autocomplete="new-password"></div>
+          <div class="field"><label>Repetir nueva</label><input id="pf-repeat-pw" type="password" minlength="8" autocomplete="new-password"></div>
         </div>
         <button class="btn btn-soft btn-block" id="btn-change-password">Actualizar contraseña</button>
         <p class="field-hint">Si no recuerdas la actual, cierra sesión y pulsa “¿Has olvidado tu contraseña?”.</p>

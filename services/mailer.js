@@ -188,6 +188,53 @@ async function sendNotificationEmail(user, { title, body, kind = 'aviso', link =
   return sendMail({ to: user.email, subject: `${label}: ${title} · OSTEOMUR Training`, text, html });
 }
 
+// Aviso operativo al equipo cuando un cliente confirma una reserva.
+// A diferencia de los avisos de cliente, aquí no se comprueba la preferencia
+// email_notifications: el helper de notificaciones decide a quién enviarlo.
+async function sendAdminBookingEmail(admin, booking, link = null) {
+  const adminName = admin.full_name || 'equipo';
+  const clientName = booking.clientName || 'Cliente';
+  const clientEmail = booking.clientEmail || 'sin email';
+  const when = `${booking.date || 'fecha desconocida'} a las ${booking.time || 'hora desconocida'}${booking.endTime ? ` - ${booking.endTime}` : ''}`;
+  const theme = booking.theme || 'Sin temática';
+  const kind = booking.kind === 'dirigida' ? 'Sesión dirigida' : 'Sesión normal';
+  const bookingRef = booking.bookingId ? ` (reserva #${booking.bookingId})` : '';
+
+  const text = [
+    `Hola ${adminName},`,
+    '',
+    `El cliente ${clientName} (${clientEmail}) ha reservado una plaza en OSTEOMUR Training${bookingRef}.`,
+    '',
+    `Sesión: ${when}`,
+    `Tipo: ${kind}`,
+    `Temática: ${theme}`,
+    '',
+    ...(link ? ['Puedes ver el detalle en el panel del entrenador:', link, ''] : []),
+    'Este aviso se genera automáticamente al confirmarse la reserva.',
+  ].join('\n');
+
+  const html = layout('Nueva reserva de cliente', `
+    <p>Hola <b>${escapeHtml(adminName)}</b>,</p>
+    <p>El cliente <b>${escapeHtml(clientName)}</b> (${escapeHtml(clientEmail)}) ha reservado una plaza en OSTEOMUR Training${escapeHtml(bookingRef)}.</p>
+    <table style="width:100%;border-collapse:collapse;margin:18px 0;font-size:14px;">
+      <tr><td style="padding:8px 0;color:#64748b;">Sesión</td><td style="padding:8px 0;font-weight:700;">${escapeHtml(when)}</td></tr>
+      <tr><td style="padding:8px 0;color:#64748b;">Tipo</td><td style="padding:8px 0;">${escapeHtml(kind)}</td></tr>
+      <tr><td style="padding:8px 0;color:#64748b;">Temática</td><td style="padding:8px 0;">${escapeHtml(theme)}</td></tr>
+    </table>
+    ${link ? `<p style="margin:22px 0;">
+      <a href="${escapeHtml(link)}" style="display:inline-block;background:#063DA8;color:#fff;text-decoration:none;font-weight:700;padding:12px 20px;border-radius:10px;">Abrir panel del entrenador</a>
+    </p>` : ''}
+    <p style="font-size:12px;color:#64748b;">Este aviso se genera automáticamente al confirmarse la reserva.</p>
+  `);
+
+  return sendMail({
+    to: admin.email,
+    subject: `Nueva reserva de ${clientName} · OSTEOMUR Training`,
+    text,
+    html,
+  });
+}
+
 function getOutbox() {
   return outbox.slice();
 }
@@ -202,6 +249,7 @@ module.exports = {
   sendPasswordResetEmail,
   sendPasswordChangedEmail,
   sendNotificationEmail,
+  sendAdminBookingEmail,
   getOutbox,
   clearOutbox,
 };
