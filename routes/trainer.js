@@ -1245,6 +1245,7 @@ router.delete('/exercises/:id', (req, res, next) => {
 // credit_wallets / credit_transactions y NO se tocan al borrar un pago:
 // el borrado solo hace que ese importe deje de contarse en facturación.
 const MAX_PAYMENTS = 20;
+const PAYMENTS_PAGE_SIZE = 12;
 
 function paymentDate(value) {
   const s = String(value == null ? '' : value).trim();
@@ -1259,27 +1260,78 @@ function paymentDate(value) {
   return s;
 }
 
+// Cursor opaco con la clave de ordenación (created_at, id). Paginando por clave
+// en vez de por OFFSET no se repiten ni se saltan filas si hay pagos con la
+// misma fecha o se elimina uno mientras se recorre la lista.
+function paymentCursor(value) {
+  const s = String(value == null ? '' : value).trim();
+  if (!s) return null;
+  try {
+    const obj = JSON.parse(Buffer.from(s, 'base64url').toString('utf8'));
+    if (!obj || !/^\d{4}-\d{2}-\d{2}/.test(String(obj.c)) || !Number.isInteger(obj.i) || obj.i <= 0) {
+      throw new Error('cursor inválido');
+    }
+    return { createdAt: String(obj.c), id: obj.i };
+  } catch {
+    throw new ApiError(400, 'Cursor de pagos no válido');
+  }
+}
+
+// Por defecto se listan los pagos del mes actual y los dos anteriores.
+// Una fecha concreta gana sobre el rango; from/to lo sustituyen si se envían.
+function paymentsRange(query, date) {
+  if (date) return { from: date, to: date };
+  const now = new Date();
+  const first = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+  const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const range = {
+    from: paymentDate(query.from) || toDateStr(first),
+    to: paymentDate(query.to) || toDateStr(last),
+  };
+  if (range.from > range.to) throw new ApiError(400, 'El rango de fechas no es válido');
+  return range;
+}
+
 router.get('/payments', (req, res, next) => {
   try {
-    const limit = Math.min(MAX_PAYMENTS, Math.max(1, Number(req.query.limit) || MAX_PAYMENTS));
+    const limit = Math.min(MAX_PAYMENTS, Math.max(1, Number(req.query.limit) || PAYMENTS_PAGE_SIZE));
     const search = String(req.query.search || '').trim().toLowerCase();
     const date = paymentDate(req.query.date);
-    const where = [];
-    const args = [];
+    const range = paymentsRange(req.query, date);
+    const cursor = paymentCursor(req.query.cursor);
+
+    const where = ['substr(p.created_at, 1, 10) BETWEEN ? AND ?'];
+    const args = [range.from, range.to];
     if (search) { where.push("LOWER(u.full_name) LIKE ? ESCAPE '\\'"); args.push('%' + search.replace(/[%_\\]/g, '\\$&') + '%'); }
-    if (date) { where.push('substr(p.created_at, 1, 10) = ?'); args.push(date); }
-    const clause = where.length ? 'WHERE ' + where.join(' AND ') : '';
-    const payments = db.prepare(
+    const clause = 'WHERE ' + where.join(' AND ');
+
+    let cursorClause = '';
+    const pageArgs = args.slice();
+    if (cursor) {
+      cursorClause = ' AND (p.created_at < ? OR (p.created_at = ? AND p.id < ?))';
+      pageArgs.push(cursor.createdAt, cursor.createdAt, cursor.id);
+    }
+
+    // Se pide una fila más para saber si queda otra página sin hacer un COUNT extra.
+    const rows = db.prepare(
       `SELECT p.id, p.user_id, p.plan, p.amount_eur, p.credits_granted, p.payment_method,
               p.created_at, p.expires_at, u.full_name
        FROM packages p JOIN users u ON u.id = p.user_id
-       ${clause}
+       ${clause}${cursorClause}
        ORDER BY p.created_at DESC, p.id DESC LIMIT ?`
-    ).all(...args, limit);
+    ).all(...pageArgs, limit + 1);
+
+    const hasMore = rows.length > limit;
+    const payments = hasMore ? rows.slice(0, limit) : rows;
+    const last = payments[payments.length - 1];
+    const nextCursor = hasMore && last
+      ? Buffer.from(JSON.stringify({ c: last.created_at, i: Number(last.id) })).toString('base64url')
+      : null;
     const total = db.prepare(
       `SELECT COUNT(*) AS c FROM packages p JOIN users u ON u.id = p.user_id ${clause}`
     ).get(...args).c;
-    res.json({ payments, total, limit: MAX_PAYMENTS });
+
+    res.json({ payments, total, limit, from: range.from, to: range.to, nextCursor, hasMore });
   } catch (e) { next(e); }
 });
 

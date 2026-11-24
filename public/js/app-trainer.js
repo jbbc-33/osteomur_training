@@ -16,7 +16,11 @@ const T = {
   ficha: null,
   fichaId: null,
   refreshTimer: null,
-  payments: { search: '', date: '', timer: null },
+  payments: {
+    search: '', date: '', timer: null,
+    items: [], rendered: 0, cursor: null, hasMore: true, total: 0,
+    from: '', to: '', loading: false, requestId: 0,
+  },
 };
 
 if (!API.getUser() || API.getUser().role !== 'trainer') location.href = '/index.html';
@@ -4850,8 +4854,9 @@ async function loadFacturacion() {
         </div>
         <div class="card">
           <h3>Últimos pagos</h3>
-          <p class="small muted">Hasta 20 pagos, de más reciente a más antiguo. Eliminar un pago solo lo quita de la facturación: no afecta a los bonos ni a los créditos del cliente.</p>
+          <p class="small muted">Pagos del mes actual y los dos anteriores, de más reciente a más antiguo. La lista se carga por partes al desplazarte. Eliminar un pago solo lo quita de la facturación: no afecta a los bonos ni a los créditos del cliente.</p>
           <div id="fact-payments-filters"></div>
+          <div id="fact-payments-range" class="small muted"></div>
           <div id="fact-recent-packages"><p class="muted">Cargando…</p></div>
         </div>
       </div>`;
@@ -4882,16 +4887,47 @@ function renderPaymentsFilters() {
   date.addEventListener('change', () => { T.payments.date = date.value; loadPayments(); });
 }
 
-async function loadPayments() {
+async function loadPayments(reset = true) {
   const box = $('fact-recent-packages');
   if (!box) return;
-  const qs = new URLSearchParams({ limit: '20' });
+  if (reset) {
+    // Un cambio de filtros descarta cualquier petición anterior en vuelo.
+    T.payments.loading = false;
+    T.payments.requestId++;
+    T.payments.items = [];
+    T.payments.rendered = 0;
+    T.payments.cursor = null;
+    T.payments.hasMore = true;
+    T.payments.total = 0;
+    T.payments.from = '';
+    T.payments.to = '';
+    box.innerHTML = '<p class="muted">Cargando…</p>';
+  }
+  if (T.payments.loading || (!reset && !T.payments.hasMore)) return;
+  const requestId = ++T.payments.requestId;
+  T.payments.loading = true;
+
+  const qs = new URLSearchParams({ limit: '12' });
   if (T.payments.search) qs.set('search', T.payments.search);
   if (T.payments.date) qs.set('date', T.payments.date);
+  if (T.payments.cursor) qs.set('cursor', T.payments.cursor);
   try {
     const data = await API.get('/trainer/payments?' + qs.toString());
-    renderPaymentsTable(box, data.payments);
-  } catch (e) { toast(e.message, 'err'); }
+    if (requestId !== T.payments.requestId) return; // respuesta obsoleta
+    T.payments.loading = false;
+    T.payments.items.push(...(data.payments || []));
+    T.payments.cursor = data.nextCursor || null;
+    T.payments.hasMore = !!data.hasMore;
+    T.payments.total = Number(data.total) || 0;
+    T.payments.from = data.from;
+    T.payments.to = data.to;
+    renderPaymentsTable(box);
+  } catch (e) {
+    if (requestId === T.payments.requestId) {
+      T.payments.loading = false;
+      toast(e.message, 'err');
+    }
+  }
 }
 
 async function refreshFacturacionMetrics() {
@@ -4965,45 +5001,88 @@ function renderProfileDonut(ov) {
     </div>`;
 }
 
-function renderPaymentsTable(el, packages) {
+function paymentRowHtml(p) {
+  const id = Number(p.id);
+  const client = p.full_name || 'Cliente';
+  return `<div class="payment-item" role="listitem">
+    <div class="payment-main">
+      <div class="payment-client">${esc(client)}</div>
+      <div class="small muted">${esc(p.plan)} · +${esc(p.credits_granted)} créd. · ${p.payment_method === 'tarjeta' ? 'Tarjeta' : 'Efectivo'}</div>
+    </div>
+    <div class="payment-side">
+      <b>${esc(Number(p.amount_eur).toFixed(2))} €</b>
+      <span class="small muted">${esc(paymentDateLabel(p.created_at))}</span>
+    </div>
+    <button type="button" class="btn btn-sm btn-danger payment-del" data-del-payment="${id}" aria-label="Eliminar pago de ${esc(client)}">Eliminar</button>
+  </div>`;
+}
+
+function installPaymentsHandlers(box, list) {
+  // Evento delegado: sigue funcionando para las filas que se añaden después.
+  if (!box.dataset.paymentsBound) {
+    box.dataset.paymentsBound = '1';
+    box.addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('[data-del-payment]');
+      if (!btn) return;
+      const id = Number(btn.dataset.delPayment);
+      if (!Number.isInteger(id) || id <= 0) return;
+      const ok = await confirmDialog(
+        'Eliminar pago',
+        'El pago dejará de contarse en la facturación. No se modificarán los bonos asignados ni los créditos concedidos al cliente. ¿Continuar?',
+        'Eliminar pago'
+      );
+      if (!ok) return;
+      try {
+        const data = await API.del('/trainer/payments/' + id);
+        toast(data.message || 'Pago eliminado');
+        await Promise.all([refreshFacturacionMetrics(), loadPayments()]);
+      } catch (e) { toast(e.message, 'err'); }
+    });
+  }
+  // Carga progresiva: al llegar al final del contenedor con scroll se pide la
+  // siguiente página. El botón "Cargar más" es el alternativo accesible.
+  list.addEventListener('scroll', () => {
+    if (T.payments.loading || !T.payments.hasMore) return;
+    if (list.scrollTop + list.clientHeight >= list.scrollHeight - 120) loadPayments(false);
+  }, { passive: true });
+}
+
+function renderPaymentsTable(el) {
   if (!el) return;
-  const rows = Array.isArray(packages) ? packages : [];
+  const rows = T.payments.items;
   if (!rows.length) {
     el.innerHTML = '<p class="muted">Sin pagos para los filtros seleccionados.</p>';
     return;
   }
-  el.innerHTML = `<div class="payments-list" role="list">${rows
-    .map((p) => {
-      const id = Number(p.id);
-      const client = p.full_name || 'Cliente';
-      return `<div class="payment-item" role="listitem">
-        <div class="payment-main">
-          <div class="payment-client">${esc(client)}</div>
-          <div class="small muted">${esc(p.plan)} · +${esc(p.credits_granted)} créd. · ${p.payment_method === 'tarjeta' ? 'Tarjeta' : 'Efectivo'}</div>
-        </div>
-        <div class="payment-side">
-          <b>${esc(Number(p.amount_eur).toFixed(2))} €</b>
-          <span class="small muted">${esc(paymentDateLabel(p.created_at))}</span>
-        </div>
-        <button type="button" class="btn btn-sm btn-danger payment-del" data-del-payment="${id}" aria-label="Eliminar pago de ${esc(client)}">Eliminar</button>
+  let list = el.querySelector('.payments-list');
+  if (!list) {
+    el.innerHTML = `
+      <div class="payments-list" role="list" id="payments-list"></div>
+      <div class="payments-more">
+        <span class="small muted" id="payments-count"></span>
+        <button type="button" class="btn btn-sm btn-ghost" id="payments-next" hidden>Cargar más</button>
       </div>`;
-    }).join('')}</div>`;
-
-  el.querySelectorAll('[data-del-payment]').forEach((btn) => btn.addEventListener('click', async () => {
-    const id = Number(btn.dataset.delPayment);
-    if (!Number.isInteger(id) || id <= 0) return;
-    const ok = await confirmDialog(
-      'Eliminar pago',
-      'El pago dejará de contarse en la facturación. No se modificarán los bonos asignados ni los créditos concedidos al cliente. ¿Continuar?',
-      'Eliminar pago'
-    );
-    if (!ok) return;
-    try {
-      const data = await API.del('/trainer/payments/' + id);
-      toast(data.message || 'Pago eliminado');
-      await Promise.all([refreshFacturacionMetrics(), loadPayments()]);
-    } catch (e) { toast(e.message, 'err'); }
-  }));
+    list = el.querySelector('#payments-list');
+    installPaymentsHandlers(el, list);
+  }
+  // Solo se añaden las filas nuevas: no se reconstruye la lista ni se pierde
+  // la posición de scroll del usuario.
+  if (T.payments.rendered < rows.length) {
+    list.insertAdjacentHTML('beforeend', rows.slice(T.payments.rendered).map(paymentRowHtml).join(''));
+    T.payments.rendered = rows.length;
+  }
+  const range = $('fact-payments-range');
+  if (range && T.payments.from && T.payments.to) {
+    range.textContent = `Periodo: ${T.payments.from} → ${T.payments.to}`;
+  }
+  const count = $('payments-count');
+  if (count) count.textContent = `Mostrando ${T.payments.rendered} de ${T.payments.total} pagos`;
+  const next = $('payments-next');
+  if (next) {
+    next.hidden = !T.payments.hasMore;
+    next.disabled = T.payments.loading;
+    next.textContent = T.payments.loading ? 'Cargando…' : 'Cargar más';
+  }
 }
 
 function renderBonoList() {

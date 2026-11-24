@@ -275,6 +275,40 @@ async function main() {
   const payBadDate = await req('GET', '/trainer/payments?date=23-11-2026', null, tToken);
   assert(payBadDate.status === 400, 'Fecha de pago inválida rechazada');
 
+  // Rango por defecto: mes actual + los dos anteriores.
+  const payNow = new Date();
+  const payMonthStart = new Date(payNow.getFullYear(), payNow.getMonth() - 2, 1);
+  const payMonthEnd = new Date(payNow.getFullYear(), payNow.getMonth() + 1, 0);
+  const payFmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  assert(payAll.body.from === payFmt(payMonthStart) && payAll.body.to === payFmt(payMonthEnd),
+    `Rango de pagos: mes actual + 2 anteriores (${payAll.body.from} → ${payAll.body.to})`);
+  assert(payAll.body.payments.every((p) => p.created_at.slice(0, 10) >= payAll.body.from
+    && p.created_at.slice(0, 10) <= payAll.body.to), 'Todos los pagos listados están dentro del rango');
+
+  // Carga progresiva: 15 pagos con la misma fecha (desempate por id) en 3 páginas de 5.
+  const pagerReg = await req('POST', '/auth/register', {
+    email: 'pago-paginacion@demo.com', password: 'demo1234', full_name: 'Pago Pagina',
+  });
+  assert(pagerReg.status === 201, 'Cliente para probar la carga progresiva');
+  const pagerId = testDb.prepare('SELECT id FROM users WHERE email = ?').get('pago-paginacion@demo.com').id;
+  const insPagedPay = testDb.prepare(
+    "INSERT INTO packages (user_id, plan, amount_eur, credits_granted, created_at) VALUES (?, 'Prueba paginación', 1, 1, datetime('now'))"
+  );
+  for (let i = 0; i < 15; i++) insPagedPay.run(pagerId);
+  const pagedUrl = '/trainer/payments?search=' + encodeURIComponent('Pago Pagina') + '&limit=5';
+  const page1 = await req('GET', pagedUrl, null, tToken);
+  assert(page1.status === 200 && page1.body.payments.length === 5 && page1.body.total === 15
+    && page1.body.hasMore === true && !!page1.body.nextCursor, `Primera página de pagos (${page1.body.payments.length}/15)`);
+  const page2 = await req('GET', pagedUrl + '&cursor=' + encodeURIComponent(page1.body.nextCursor || ''), null, tToken);
+  const page3 = await req('GET', pagedUrl + '&cursor=' + encodeURIComponent(page2.body.nextCursor || ''), null, tToken);
+  assert(page2.status === 200 && page2.body.payments.length === 5, 'Segunda página de pagos');
+  assert(page3.status === 200 && page3.body.payments.length === 5 && page3.body.hasMore === false
+    && page3.body.nextCursor === null, 'Última página de pagos sin cursor');
+  const pagedIds = [...page1.body.payments, ...page2.body.payments, ...page3.body.payments].map((p) => p.id);
+  assert(new Set(pagedIds).size === 15, 'La paginación no repite ni salta pagos');
+  const pageBad = await req('GET', pagedUrl + '&cursor=not-a-cursor', null, tToken);
+  assert(pageBad.status === 400, 'Cursor de pagos inválido rechazado');
+
   // Cliente desechable: al borrar un pago los créditos se conservan a propósito,
   // así que no debemos alterar el saldo de los clientes usados en otros tests.
   const pagoClient = await req('POST', '/auth/register', {
