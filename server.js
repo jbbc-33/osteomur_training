@@ -7,6 +7,7 @@ const authRoutes = require('./routes/auth');
 const clientRoutes = require('./routes/client');
 const trainerRoutes = require('./routes/trainer');
 const { startScheduler } = require('./services/notifications');
+const mailer = require('./services/mailer');
 const { addClient, removeClient } = require('./services/events');
 const { sweepExpiredWallets } = require('./services/business');
 const { verifyToken, verifyEventsTicket } = require('./middleware/auth');
@@ -71,7 +72,11 @@ app.use('/api', rateLimit({
 }));
 
 app.use('/api/auth', authRoutes);
-app.get('/api/health', (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
+app.get('/api/health', (req, res) => res.json({
+  ok: true,
+  time: new Date().toISOString(),
+  mail: mailer.describeConfig(),
+}));
 
 // ---------- Tiempo real (Server-Sent Events) ----------
 // EventSource no permite enviar la cabecera Authorization. En vez de poner el
@@ -172,6 +177,8 @@ if (require.main === module) {
   console.log('  Vista Cliente:    abrir la URL y hacer login con cuenta de cliente');
   console.log('  Panel Entrenador: login con cuenta de entrenador');
   console.log('  Cuentas demo (clave: demo1234) en README.md');
+  const mail = mailer.describeConfig();
+  console.log(`  Correo: ${mail.provider} · remitente ${mail.from || '(sin configurar)'} · ${mail.configured ? 'envío activo' : 'solo outbox/log'}`);
   });
 
   // Timeouts defensivos: una conexión que envía cabeceras o un cuerpo muy lento

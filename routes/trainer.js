@@ -10,6 +10,7 @@ const { notify } = require('../services/notifications');
 const { broadcast, broadcastToUser } = require('../services/events');
 const { listTags, listExercisesWithTags, syncExerciseTags } = require('../services/exercises');
 const { setUserPassword } = require('../services/passwords');
+const mailer = require('../services/mailer');
 const { text, optionalText, int, videoUrl, avatarPhoto } = require('../middleware/validate');
 
 const router = express.Router();
@@ -1472,6 +1473,32 @@ router.get('/client/:id/wellness', (req, res, next) => {
       : null;
 
     res.json({ client: c, history, stats: Object.values(statsByQ), sleep_stats: sleepStats });
+  } catch (e) { next(e); }
+});
+
+// ---------- Comprobación de correo desde producción ----------
+// Envía un correo de prueba solo al entrenador autenticado. No expone la clave
+// API: describeConfig() devuelve únicamente datos no sensibles.
+router.post('/mail/test', async (req, res, next) => {
+  try {
+    const user = db.prepare('SELECT id, full_name, email FROM users WHERE id = ?').get(req.user.id);
+    if (!user || !user.email) throw new ApiError(400, 'Tu cuenta no tiene email');
+    const result = await mailer.sendMail({
+      to: user.email,
+      subject: 'Correo de prueba · OSTEOMUR Training',
+      text: [
+        `Hola ${user.full_name || 'equipo'},`,
+        '',
+        'Este correo confirma que la app puede enviar correos desde producción.',
+        'Si lo has recibido, los avisos y las recuperaciones funcionarán con normalidad.',
+      ].join('\n'),
+    });
+    res.json({
+      delivered: !!result.delivered,
+      error: result.error || result.outbox?.error || null,
+      to: user.email,
+      config: mailer.describeConfig(),
+    });
   } catch (e) { next(e); }
 });
 

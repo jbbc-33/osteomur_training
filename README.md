@@ -52,8 +52,8 @@ El sistema admite dos proveedores, elegidos con `MAIL_PROVIDER`:
 | `MAIL_PROVIDER` | No | `gmail` (defecto) o `brevo` |
 | `GMAIL_USER` | Sí con `gmail` | Cuenta de Gmail desde la que se envían los correos |
 | `GMAIL_APP_PASSWORD` | Sí con `gmail` | Contraseña de aplicación de Google (requiere verificación en 2 pasos) |
-| `BREVO_API_KEY` | Sí con `brevo` | Clave API de Brevo (`https://app.brevo.com/settings/keys/api`) |
-| `MAIL_FROM` | Recomendable | Remitente visible, p. ej. `OSTEOMUR Training <cuenta@gmail.com>`. Con Brevo debe ser un **remitente verificado** en Brevo |
+| `BREVO_API_KEY` | Sí con `brevo` | Clave API REST de Brevo con permiso **Transactional email → All** (`https://app.brevo.com/settings/keys/api`). No sirve una clave SMTP ni una clave MCP |
+| `MAIL_FROM` | Recomendable | Remitente visible. Formato recomendado: `OSTEOMUR Training <osteomurclinica@gmail.com>`. También se acepta `OSTEOMUR Training osteomurclinica@gmail.com`. Con Brevo debe ser un **remitente verificado** en Brevo |
 | `PUBLIC_BASE_URL` | No | URL pública de la app (`https://tu-dominio`) para el enlace de recuperación y el botón de los emails de avisos |
 | `MAIL_OUTBOX_ONLY` | No | `1` para no enviar correos reales (tests/desarrollo). **No debe estar a `1` en producción** |
 
@@ -62,6 +62,12 @@ Para usar Brevo: crea la cuenta, verifica un remitente en *Senders & Domains* y 
 Si no hay credenciales, la app sigue funcionando: no se envían correos (el contenido queda en el log del servidor) y el enlace de recuperación aparece también en el log. Los avisos y alertas siguen llegando al centro de notificaciones de la app y, si está activado, por Web Push.
 
 Si en producción ves `[mailer] No se pudo enviar el correo ... Brevo 401`, la clave API es incorrecta; si ves `Brevo 403`, el remitente de `MAIL_FROM` no está verificado en Brevo.
+
+### Comprobar el correo en producción
+
+- `GET /api/health` devuelve `mail`: proveedor, remitente detectado y si el envío está activo, sin claves ni secretos.
+- `POST /api/trainer/mail/test` (con el token del entrenador) envía un correo de prueba **al propio entrenador** y devuelve `{ delivered, error, to, config }`. Es la forma más rápida de confirmar que Brevo acepta el remitente y la clave.
+- Los avisos a clientes (recordatorios, créditos, bonos) solo se envían si el cliente tiene `email_notifications` activo; los avisos de nueva reserva solo a entrenadores activos con esa misma preferencia. Si el destinatario usa un correo temporal, Brevo puede aceptar la petición pero el proveedor del buzón temporal puede filtrarla: comprueba siempre primero con tu correo real.
 
 ---
 

@@ -812,7 +812,32 @@ async function main() {
   });
   const apiFail = await mailer.sendMail({ to: 'cliente@demo.com', subject: 'Prueba API', text: 'Hola' });
   assert(apiFail.delivered === false && /Brevo 401/.test(apiFail.error || ''), 'Error de la API HTTPS registrado sin lanzar excepción');
+
+  // MAIL_FROM también admite la forma sin corchetes (y con comillas).
+  global.fetch = async (url, options) => {
+    captured = { url, options };
+    return { ok: true, json: async () => ({ messageId: 'test-id2' }) };
+  };
+  process.env.MAIL_FROM = "'OSTEOMUR Training pruebas@osteomur.es'";
+  const apiFromPlain = await mailer.sendMail({ to: 'cliente@demo.com', subject: 'Prueba API', text: 'Hola' });
+  let plainPayload = null;
+  try { plainPayload = JSON.parse(captured.options.body); } catch { /* se comprueba abajo */ }
+  assert(apiFromPlain.delivered === true && plainPayload && plainPayload.sender.email === 'pruebas@osteomur.es'
+    && plainPayload.sender.name === 'OSTEOMUR Training', 'MAIL_FROM sin corchetes se normaliza correctamente');
+
   restoreMailEnv();
+  mailer.clearOutbox();
+
+  const health = await req('GET', '/health');
+  assert(health.status === 200 && health.body.mail && health.body.mail.outboxOnly === true
+    && health.body.mail.configured === false && typeof health.body.mail.provider === 'string'
+    && !('key' in health.body.mail), 'Health expone la configuración de correo sin secretos');
+
+  const testMail = await req('POST', '/trainer/mail/test', null, tToken);
+  assert(testMail.status === 200 && testMail.body.delivered === false
+    && testMail.body.error === 'Correo no configurado'
+    && mailer.getOutbox().some((m) => /Correo de prueba/.test(m.subject)),
+  'Endpoint de prueba de correo disponible para el entrenador');
   mailer.clearOutbox();
 
   console.log('\n== FRONTEND (ficheros estáticos) ==');

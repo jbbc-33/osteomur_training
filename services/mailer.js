@@ -36,19 +36,45 @@ function provider() {
 }
 
 // Brevo espera { sender: { email, name } }, no el string "Nombre <email>".
+function validEmail(value) {
+  return /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]{2,}$/.test(String(value || '').trim());
+}
+
+// Acepta las tres formas habituales de MAIL_FROM:
+//   "Nombre <email>", "Nombre email" y "email" (con o sin comillas en el valor).
 function parseAddress(value) {
-  const raw = String(value || '').trim();
+  const raw = String(value || '').trim().replace(/^['"]|['"]$/g, '').trim();
   const m = /^(.*?)\s*<([^<>]+)>$/.exec(raw);
-  if (m && m[2].includes('@')) {
-    return { email: m[2].trim(), name: m[1].replace(/^"|"$/g, '').trim() };
+  if (m && validEmail(m[2])) {
+    return { email: m[2].trim(), name: m[1].replace(/^['"]|['"]$/g, '').trim() };
+  }
+  const found = /([^\s@<>]+@[^\s@<>]+\.[^\s@<>]{2,})/.exec(raw);
+  if (found && validEmail(found[1])) {
+    const name = raw.replace(found[1], '').replace(/[<>]/g, '').replace(/\s+/g, ' ').trim();
+    return { email: found[1], name };
   }
   return { email: raw, name: '' };
+}
+
+// Solo datos no sensibles: sirve para comprobar la configuración en producción.
+function describeConfig() {
+  const from = parseAddress(fromAddress());
+  return {
+    provider: provider(),
+    configured: isConfigured(),
+    outboxOnly: process.env.MAIL_OUTBOX_ONLY === '1',
+    hasCredentials: provider() === 'brevo'
+      ? !!String(process.env.BREVO_API_KEY || '').trim()
+      : !!(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD),
+    from: from.email,
+    fromName: from.name,
+  };
 }
 
 function isConfigured() {
   if (process.env.MAIL_OUTBOX_ONLY === '1') return false;
   if (provider() === 'brevo') {
-    return !!(String(process.env.BREVO_API_KEY || '').trim() && parseAddress(fromAddress()).email);
+    return !!(String(process.env.BREVO_API_KEY || '').trim() && validEmail(parseAddress(fromAddress()).email));
   }
   return !!(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD);
 }
@@ -316,4 +342,5 @@ module.exports = {
   sendAdminBookingEmail,
   getOutbox,
   clearOutbox,
+  describeConfig,
 };
