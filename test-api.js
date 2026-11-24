@@ -769,6 +769,52 @@ async function main() {
   const prefOn = await req('PUT', '/me', { email_notifications: true }, carlosToken6);
   assert(prefOn.status === 200 && prefOn.body.user.email_notifications === 1, 'El cliente puede reactivar los avisos por email');
 
+  console.log('\n== CORREO: API HTTPS (producción sin SMTP) ==');
+  const mailEnv = {
+    outbox: process.env.MAIL_OUTBOX_ONLY,
+    provider: process.env.MAIL_PROVIDER,
+    key: process.env.BREVO_API_KEY,
+    from: process.env.MAIL_FROM,
+    fetch: global.fetch,
+  };
+  const restoreMailEnv = () => {
+    global.fetch = mailEnv.fetch;
+    for (const [name, value] of [
+      ['MAIL_OUTBOX_ONLY', mailEnv.outbox], ['MAIL_PROVIDER', mailEnv.provider],
+      ['BREVO_API_KEY', mailEnv.key], ['MAIL_FROM', mailEnv.from],
+    ]) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  };
+
+  let captured = null;
+  global.fetch = async (url, options) => {
+    captured = { url, options };
+    return { ok: true, json: async () => ({ messageId: 'test-id' }) };
+  };
+  process.env.MAIL_OUTBOX_ONLY = '0';
+  process.env.MAIL_PROVIDER = 'brevo';
+  process.env.BREVO_API_KEY = 'test-key';
+  process.env.MAIL_FROM = 'OSTEOMUR Training <pruebas@osteomur.es>';
+  const apiOk = await mailer.sendMail({ to: 'cliente@demo.com', subject: 'Prueba API', text: 'Hola' });
+  let apiPayload = null;
+  try { apiPayload = JSON.parse(captured.options.body); } catch { /* se comprueba abajo */ }
+  assert(apiOk.delivered === true && captured.url === 'https://api.brevo.com/v3/smtp/email'
+    && captured.options.headers['api-key'] === 'test-key'
+    && apiPayload && apiPayload.sender.email === 'pruebas@osteomur.es'
+    && apiPayload.sender.name === 'OSTEOMUR Training'
+    && apiPayload.to[0].email === 'cliente@demo.com', 'Envío por API HTTPS sin SMTP');
+
+  global.fetch = async () => ({
+    ok: false, status: 401, statusText: 'Unauthorized',
+    json: async () => ({ message: 'Invalid API key' }),
+  });
+  const apiFail = await mailer.sendMail({ to: 'cliente@demo.com', subject: 'Prueba API', text: 'Hola' });
+  assert(apiFail.delivered === false && /Brevo 401/.test(apiFail.error || ''), 'Error de la API HTTPS registrado sin lanzar excepción');
+  restoreMailEnv();
+  mailer.clearOutbox();
+
   console.log('\n== FRONTEND (ficheros estáticos) ==');
   const sreq = (p) => new Promise((resolve) => {
     const r = http.request(`http://localhost:${PORT}${p}`, { method: 'GET' }, (res) => {

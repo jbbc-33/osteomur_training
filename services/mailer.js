@@ -1,17 +1,27 @@
 'use strict';
 
 /*
-  Envío de correo transaccional por Gmail SMTP.
+  Envío de correo transaccional. Dos proveedores, elegidos con MAIL_PROVIDER:
 
-  Configuración (variables de entorno):
-    GMAIL_USER          cuenta de Gmail desde la que se envía
-    GMAIL_APP_PASSWORD  contraseña de aplicación de Google (requiere 2FA)
-    MAIL_FROM           remitente opcional ("OSTEOMUR Training <cuenta@gmail.com>")
+    gmail (por defecto)  Gmail SMTP. Útil en local y en servidores que permitan
+                         el puerto 465. Railway bloquea SMTP en los planes
+                         Hobby/Free/Trial, ahí hay que usar brevo.
+    brevo                API HTTPS de Brevo (puerto 443), sin dependencias:
+                         usa el fetch nativo de Node.
+
+  Variables de entorno:
+    MAIL_PROVIDER       "gmail" (defecto) o "brevo"
+    GMAIL_USER          cuenta de Gmail desde la que se envía (gmail)
+    GMAIL_APP_PASSWORD  contraseña de aplicación de Google, requiere 2FA (gmail)
+    BREVO_API_KEY       clave API de Brevo (brevo)
+    MAIL_FROM           remitente, p. ej. "OSTEOMUR Training <cuenta@gmail.com>".
+                        Con brevo debe ser un remitente verificado en Brevo.
+    PUBLIC_BASE_URL     URL pública para los enlaces de recuperación/avisos
     MAIL_OUTBOX_ONLY    si vale "1", nunca se envía de verdad (tests/desarrollo)
 
   Si no hay credenciales, el mensaje se guarda en un "outbox" en memoria y se
-  escribe el enlace en el log. Así la recuperación sigue siendo probable en local
-  y en los tests sin necesidad de Gmail.
+  escribe el contenido en el log. Así la recuperación sigue siendo probable en
+  local y en los tests sin necesidad de configurar ningún proveedor.
 */
 
 const nodemailer = require('nodemailer');
@@ -21,8 +31,25 @@ const outbox = [];
 
 let transporter = null;
 
+function provider() {
+  return String(process.env.MAIL_PROVIDER || '').trim().toLowerCase() === 'brevo' ? 'brevo' : 'gmail';
+}
+
+// Brevo espera { sender: { email, name } }, no el string "Nombre <email>".
+function parseAddress(value) {
+  const raw = String(value || '').trim();
+  const m = /^(.*?)\s*<([^<>]+)>$/.exec(raw);
+  if (m && m[2].includes('@')) {
+    return { email: m[2].trim(), name: m[1].replace(/^"|"$/g, '').trim() };
+  }
+  return { email: raw, name: '' };
+}
+
 function isConfigured() {
   if (process.env.MAIL_OUTBOX_ONLY === '1') return false;
+  if (provider() === 'brevo') {
+    return !!(String(process.env.BREVO_API_KEY || '').trim() && parseAddress(fromAddress()).email);
+  }
   return !!(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD);
 }
 
@@ -48,6 +75,41 @@ function getTransporter() {
   return transporter;
 }
 
+// HTTP en vez de SMTP: funciona en Railway Hobby, donde el puerto 465 está
+// bloqueado. No se añade ninguna dependencia: Node 24 trae fetch y timeout.
+async function sendBrevo(message) {
+  const from = parseAddress(message.from);
+  const payload = {
+    sender: { email: from.email, ...(from.name ? { name: from.name } : {}) },
+    to: [{ email: message.to }],
+    subject: message.subject,
+    ...(message.html ? { html: message.html } : { textContent: message.text || '' }),
+  };
+
+  const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'content-type': 'application/json',
+      'api-key': String(process.env.BREVO_API_KEY || '').trim(),
+    },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const data = await res.json();
+      detail = data.message || JSON.stringify(data);
+    } catch {
+      detail = await res.text().catch(() => '');
+    }
+    throw new Error(`Brevo ${res.status}: ${detail || res.statusText}`);
+  }
+  const info = await res.json().catch(() => ({}));
+  return info.messageId || '';
+}
+
 async function sendMail({ to, subject, text, html }) {
   if (!to) return { delivered: false, error: 'Destinatario vacío' };
   const message = {
@@ -71,17 +133,19 @@ async function sendMail({ to, subject, text, html }) {
   if (outbox.length > OUTBOX_LIMIT) outbox.shift();
 
   if (!isConfigured()) {
-    record.error = 'Gmail no configurado';
-    console.log(`[mailer] Gmail no configurado. Correo para ${to} no enviado. Asunto: ${subject}`);
+    record.error = 'Correo no configurado';
+    console.log(`[mailer] ${provider()} no configurado. Correo para ${to} no enviado. Asunto: ${subject}`);
     if (text) console.log(`[mailer] Contenido:\n${text}`);
     return { delivered: false, outbox: record };
   }
 
   try {
-    const info = await getTransporter().sendMail(message);
+    const messageId = provider() === 'brevo'
+      ? await sendBrevo(message)
+      : (await getTransporter().sendMail(message)).messageId;
     record.delivered = true;
-    record.message_id = info.messageId;
-    return { delivered: true, messageId: info.messageId, outbox: record };
+    record.message_id = messageId;
+    return { delivered: true, messageId, outbox: record };
   } catch (e) {
     record.error = e.message;
     console.warn(`[mailer] No se pudo enviar el correo a ${to}: ${e.message}`);

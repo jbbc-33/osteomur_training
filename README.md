@@ -42,17 +42,26 @@ Al loguearse, la app redirige automáticamente a la vista correspondiente según
 - **Avisos y alertas por email**: además del centro de notificaciones de la app, los clientes reciben por Gmail los recordatorios de clase, avisos de créditos/bonos y alertas. El cliente puede desactivar estos correos en **Mi perfil → Notificaciones**.
 - Los correos de **recuperación de cuenta y seguridad** (enlace de contraseña y confirmación de cambio) son obligatorios y **no se pueden desactivar**.
 
-Para que los correos salgan por Gmail, configura estas variables de entorno en el servidor:
+El sistema admite dos proveedores, elegidos con `MAIL_PROVIDER`:
+
+- **`gmail` (por defecto)**: SMTP de Gmail. Funciona en local y en servidores que permitan el puerto 465.
+- **`brevo`**: API HTTPS de Brevo (puerto 443), pensado para Railway. **Railway bloquea el SMTP en los planes Hobby/Free/Trial** (incluido el de 5 €/mes), así que en producción hay que usar esta opción o subir al plan Pro.
 
 | Variable | Obligatoria | Descripción |
 |---|---|---|
-| `GMAIL_USER` | Sí | Cuenta de Gmail desde la que se envían los correos |
-| `GMAIL_APP_PASSWORD` | Sí | Contraseña de aplicación de Google (requiere verificación en 2 pasos) |
-| `MAIL_FROM` | No | Remitente visible, por ejemplo `OSTEOMUR Training <cuenta@gmail.com>` (si se omite: `OSTEOMUR Training <GMAIL_USER>`) |
+| `MAIL_PROVIDER` | No | `gmail` (defecto) o `brevo` |
+| `GMAIL_USER` | Sí con `gmail` | Cuenta de Gmail desde la que se envían los correos |
+| `GMAIL_APP_PASSWORD` | Sí con `gmail` | Contraseña de aplicación de Google (requiere verificación en 2 pasos) |
+| `BREVO_API_KEY` | Sí con `brevo` | Clave API de Brevo (`https://app.brevo.com/settings/keys/api`) |
+| `MAIL_FROM` | Recomendable | Remitente visible, p. ej. `OSTEOMUR Training <cuenta@gmail.com>`. Con Brevo debe ser un **remitente verificado** en Brevo |
 | `PUBLIC_BASE_URL` | No | URL pública de la app (`https://tu-dominio`) para el enlace de recuperación y el botón de los emails de avisos |
-| `MAIL_OUTBOX_ONLY` | No | `1` para no enviar correos reales (tests/desarrollo) |
+| `MAIL_OUTBOX_ONLY` | No | `1` para no enviar correos reales (tests/desarrollo). **No debe estar a `1` en producción** |
 
-Si Gmail no está configurado, la app sigue funcionando: no se envían correos (los avisos quedan en el log del servidor) y el enlace de recuperación aparece también en el log. Los avisos y alertas siguen llegando al centro de notificaciones de la app y, si está activado, por Web Push.
+Para usar Brevo: crea la cuenta, verifica un remitente en *Senders & Domains* y genera una clave API. En Railway añade `MAIL_PROVIDER=brevo`, `BREVO_API_KEY=...` y `MAIL_FROM=<remitente verificado>` en **Variables** y redespliega. No hay que instalar paquetes nuevos: se usa el `fetch` nativo de Node.
+
+Si no hay credenciales, la app sigue funcionando: no se envían correos (el contenido queda en el log del servidor) y el enlace de recuperación aparece también en el log. Los avisos y alertas siguen llegando al centro de notificaciones de la app y, si está activado, por Web Push.
+
+Si en producción ves `[mailer] No se pudo enviar el correo ... Brevo 401`, la clave API es incorrecta; si ves `Brevo 403`, el remitente de `MAIL_FROM` no está verificado en Brevo.
 
 ---
 
@@ -108,9 +117,11 @@ Si Gmail no está configurado, la app sigue funcionando: no se envían correos (
 |---|---|---|
 | `PORT` | `3000` | Puerto del servidor |
 | `CANCEL_WINDOW_HOURS` | `2` | Límite de cancelación antes de la clase |
+| `MAIL_PROVIDER` | `gmail` | `gmail` (SMTP) o `brevo` (API HTTPS; necesario en Railway Hobby) |
 | `GMAIL_USER` | — | Cuenta Gmail para correos de recuperación, seguridad y avisos/alertas |
 | `GMAIL_APP_PASSWORD` | — | Contraseña de aplicación de Gmail |
-| `MAIL_FROM` | `OSTEOMUR Training <GMAIL_USER>` | Remitente de los correos |
+| `BREVO_API_KEY` | — | Clave API de Brevo cuando `MAIL_PROVIDER=brevo` |
+| `MAIL_FROM` | `OSTEOMUR Training <GMAIL_USER>` | Remitente de los correos (verificado en Brevo si se usa Brevo) |
 | `PUBLIC_BASE_URL` | — | URL pública usada en los enlaces de recuperación y de los avisos |
 | `MAIL_OUTBOX_ONLY` | — | `1` desactiva el envío real (tests) |
 | `ALLOWED_ORIGINS` | — | Orígenes adicionales permitidos por CORS, separados por comas (la app nativa y `localhost` ya están permitidos) |

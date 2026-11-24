@@ -93,6 +93,11 @@ capa efímera y se pierde al reiniciar.
 |---|---|---|
 | `DATA_DIR` | `/data` | Raíz de la BD, el secreto JWT y las claves VAPID |
 | `PORT` | *no la fijes* | Railway la inyecta; el servidor ya lee `process.env.PORT` y escucha en `0.0.0.0` |
+| `MAIL_PROVIDER` | `brevo` | Railway bloquea SMTP en Hobby/Free/Trial; usa la API HTTPS |
+| `BREVO_API_KEY` | clave API de Brevo | Creada en `app.brevo.com/settings/keys/api` |
+| `MAIL_FROM` | remitente verificado en Brevo | p. ej. `OSTEOMUR Training <tu-cuenta@gmail.com>` |
+| `PUBLIC_BASE_URL` | `https://TU-SERVICIO.up.railway.app` | Enlaces de recuperación y botones de los avisos |
+| `MAIL_OUTBOX_ONLY` | *no la fijes* | Si vale `1`, no se envía ningún correo |
 
 **Paso 6 — Seed inicial (una sola vez).** `db/seed.js` es **destructivo**: borra 23
 tablas, incluidos los usuarios. Solo sobre una BD vacía. Con el servicio ya
