@@ -66,7 +66,8 @@ Si en producción ves `[mailer] No se pudo enviar el correo ... Brevo 401`, la c
 ### Comprobar el correo en producción
 
 - `GET /api/health` devuelve `mail`: proveedor, remitente detectado y si el envío está activo, sin claves ni secretos.
-- `POST /api/trainer/mail/test` (con el token del entrenador) envía un correo de prueba **al propio entrenador** y devuelve `{ delivered, error, to, config }`. Es la forma más rápida de confirmar que Brevo acepta el remitente y la clave.
+- `POST /api/trainer/mail/test` (con el token del entrenador) envía un correo de prueba **al propio entrenador** y devuelve `{ delivered, error, to, config }`. Si se envía `{"to":"cliente@ejemplo.com"}`, prueba ese destinatario, siempre que esté registrado en la app. Es la forma más rápida de distinguir un fallo de Brevo de un problema de preferencias del cliente.
+- Los envíos correctos se registran como `[mailer] Enviado a ... · asunto · id=...`. Si un aviso se omite porque el cliente desactivó los correos, aparece `[notifications] Correo omitido para ...: avisos por email desactivados`.
 - Los avisos a clientes (recordatorios, créditos, bonos) solo se envían si el cliente tiene `email_notifications` activo; los avisos de nueva reserva solo a entrenadores activos con esa misma preferencia. Si el destinatario usa un correo temporal, Brevo puede aceptar la petición pero el proveedor del buzón temporal puede filtrarla: comprueba siempre primero con tu correo real.
 
 ---

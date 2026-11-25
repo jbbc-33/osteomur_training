@@ -334,7 +334,7 @@ router.get('/clients', (req, res, next) => {
     const search = (req.query.search || '').trim().toLowerCase();
     let rows = db.prepare(
       `SELECT id, full_name, email, phone, age, height_cm, sport, active_injuries, notes, objectives, priorities,
-              avatar_photo, credits_balance, credits_expires_at, is_active, created_at
+              avatar_photo, credits_balance, credits_expires_at, is_active, email_notifications, created_at
        FROM users WHERE role = 'client'${includeInactive ? '' : " AND is_active = 1"} ORDER BY full_name`
     ).all();
     if (search) {
@@ -1481,13 +1481,25 @@ router.get('/client/:id/wellness', (req, res, next) => {
 // API: describeConfig() devuelve únicamente datos no sensibles.
 router.post('/mail/test', async (req, res, next) => {
   try {
-    const user = db.prepare('SELECT id, full_name, email FROM users WHERE id = ?').get(req.user.id);
-    if (!user || !user.email) throw new ApiError(400, 'Tu cuenta no tiene email');
+    const me = db.prepare('SELECT id, full_name, email FROM users WHERE id = ?').get(req.user.id);
+    if (!me || !me.email) throw new ApiError(400, 'Tu cuenta no tiene email');
+
+    // Por defecto se envía al propio entrenador. Con "to" se puede probar un
+    // cliente real, pero solo si su email está registrado en la app.
+    const requested = String((req.body && req.body.to) || '').trim().toLowerCase();
+    let recipient = me;
+    if (requested && requested !== String(me.email).toLowerCase()) {
+      recipient = db.prepare(
+        "SELECT id, full_name, email FROM users WHERE lower(email) = ? AND email IS NOT NULL AND email <> ''"
+      ).get(requested);
+      if (!recipient) throw new ApiError(400, 'El destinatario debe ser un email registrado en la app');
+    }
+
     const result = await mailer.sendMail({
-      to: user.email,
+      to: recipient.email,
       subject: 'Correo de prueba · OSTEOMUR Training',
       text: [
-        `Hola ${user.full_name || 'equipo'},`,
+        `Hola ${recipient.full_name || 'equipo'},`,
         '',
         'Este correo confirma que la app puede enviar correos desde producción.',
         'Si lo has recibido, los avisos y las recuperaciones funcionarán con normalidad.',
@@ -1496,7 +1508,7 @@ router.post('/mail/test', async (req, res, next) => {
     res.json({
       delivered: !!result.delivered,
       error: result.error || result.outbox?.error || null,
-      to: user.email,
+      to: recipient.email,
       config: mailer.describeConfig(),
     });
   } catch (e) { next(e); }

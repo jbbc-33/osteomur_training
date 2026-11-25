@@ -99,8 +99,14 @@ function notifyAdminsNewBooking({ client, slot, bookingId = null } = {}) {
 function sendNotificationEmail(userId, title, body, type) {
   try {
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-    if (!user || user.role !== 'client' || !user.email) return;
-    if (user.email_notifications === 0) return;
+    if (!user || user.role !== 'client' || !user.email) {
+      console.warn(`[notifications] Correo omitido: usuario ${userId} sin email de cliente`);
+      return;
+    }
+    if (user.email_notifications === 0) {
+      console.log(`[notifications] Correo omitido para ${user.email}: avisos por email desactivados`);
+      return;
+    }
     Promise.resolve(mailer.sendNotificationEmail(user, {
       title,
       body,

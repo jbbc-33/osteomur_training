@@ -806,6 +806,15 @@ async function main() {
     && apiPayload.sender.name === 'OSTEOMUR Training'
     && apiPayload.to[0].email === 'cliente@demo.com', 'Envío por API HTTPS sin SMTP');
 
+  const apiHtml = await mailer.sendMail({
+    to: 'cliente@demo.com', subject: 'Prueba HTML', text: 'Texto plano', html: '<p>Hola</p>',
+  });
+  let htmlPayload = null;
+  try { htmlPayload = JSON.parse(captured.options.body); } catch { /* se comprueba abajo */ }
+  assert(apiHtml.delivered === true && htmlPayload && htmlPayload.htmlContent === '<p>Hola</p>'
+    && htmlPayload.textContent === 'Texto plano' && !('html' in htmlPayload),
+  'Los correos con HTML usan htmlContent, tal como exige Brevo');
+
   global.fetch = async () => ({
     ok: false, status: 401, statusText: 'Unauthorized',
     json: async () => ({ message: 'Invalid API key' }),
@@ -838,6 +847,13 @@ async function main() {
     && testMail.body.error === 'Correo no configurado'
     && mailer.getOutbox().some((m) => /Correo de prueba/.test(m.subject)),
   'Endpoint de prueba de correo disponible para el entrenador');
+
+  const testClientMail = await req('POST', '/trainer/mail/test', { to: 'carlos@demo.com' }, tToken);
+  assert(testClientMail.status === 200 && testClientMail.body.to === 'carlos@demo.com'
+    && mailer.getOutbox().some((m) => m.to === 'carlos@demo.com' && /Correo de prueba/.test(m.subject)),
+  'La prueba de correo admite un cliente registrado como destinatario');
+  const testBadMail = await req('POST', '/trainer/mail/test', { to: 'no-registrado@demo.com' }, tToken);
+  assert(testBadMail.status === 400, 'La prueba de correo rechaza emails que no están en la app');
   mailer.clearOutbox();
 
   console.log('\n== FRONTEND (ficheros estáticos) ==');

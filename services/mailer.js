@@ -109,7 +109,9 @@ async function sendBrevo(message) {
     sender: { email: from.email, ...(from.name ? { name: from.name } : {}) },
     to: [{ email: message.to }],
     subject: message.subject,
-    ...(message.html ? { html: message.html } : { textContent: message.text || '' }),
+    // Brevo exige htmlContent (no "html") y permite enviar también el texto plano.
+    ...(message.html ? { htmlContent: message.html } : {}),
+    textContent: message.text || '',
   };
 
   const res = await fetch('https://api.brevo.com/v3/smtp/email', {
@@ -171,6 +173,7 @@ async function sendMail({ to, subject, text, html }) {
       : (await getTransporter().sendMail(message)).messageId;
     record.delivered = true;
     record.message_id = messageId;
+    console.log(`[mailer] Enviado a ${to} · ${subject} · id=${messageId || 'sin-id'}`);
     return { delivered: true, messageId, outbox: record };
   } catch (e) {
     record.error = e.message;
