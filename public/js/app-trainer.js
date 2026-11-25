@@ -3486,23 +3486,16 @@ function openAssessmentEditor(clientId, kind) {
             </div>`).join('')}
         </div>
 
-        <h5 class="test-title">Fuerza de prensión manual</h5>
-        <input type="hidden" data-cjson="prension" value='${JSON.stringify(CJ_PRENSION)}'>
-        <div class="btn-group" data-field="cj-prension-side" style="margin-bottom:8px;">
-          <button type="button" class="btn btn-sm btn-ghost cj-prension-side${CJ_PRENSION.side === 'd' ? ' active' : ''}" data-side="d">Derecha</button>
-          <button type="button" class="btn btn-sm btn-ghost cj-prension-side${CJ_PRENSION.side === 'i' ? ' active' : ''}" data-side="i">Izquierda</button>
-        </div>
-        ${['d', 'i'].map((s) => `
-        <div class="cj-prension-att-side" data-side="${s}" style="${CJ_PRENSION.side === s ? '' : 'display:none;'}">
-          <div class="small muted" style="font-weight:700;margin-bottom:4px;">${s === 'd' ? 'Derecha' : 'Izquierda'} · kgf</div>
-          <div class="form-grid-3">
-            ${CJ_PRENSION[s].map((a, i) => `
-              <div class="assess-card">
-                <div class="small muted" style="font-weight:700;">Intento ${i + 1}</div>
-                <input class="cj-prension-att-v" data-side="${s}" data-i="${i}" type="number" step="any" value="${a.v}" placeholder="kgf" style="margin:6px 0;width:100%;">
-              </div>`).join('')}
+        <div id="panel-prension">
+          <div class="adapt-test">
+            <h6>Fuerza de prensión manual</h6>
+            <div class="adapt-body">
+              ${pSideHtml({ prension: CJ_PRENSION }, 'cj-prension-side', 'prension.side')}
+              ${pAttemptRowsHtml({ prension: CJ_PRENSION }, 'prension', 3, ['v'], true)}
+            </div>
           </div>
-        </div>`).join('')}
+          <input type="hidden" data-cjson="prension" value='${JSON.stringify(CJ_PRENSION)}'>
+        </div>
 
         <h5 class="test-title">Ebbeling — Single-Stage Treadmill Walking Test</h5>
         <input type="hidden" data-cjson="ebbeling" value='${JSON.stringify(CJ_EBB)}'>
@@ -3724,21 +3717,25 @@ function openAssessmentEditor(clientId, kind) {
       });
     });
 
-    // ---- Prensión manual (batería general, mismo modelo que adulto mayor) ----
-    function renderCjPrensionSide() {
-      overlay.querySelectorAll('[data-field="cj-prension-side"] .cj-prension-side').forEach((x) => x.classList.toggle('active', x.dataset.side === CJ_PRENSION.side));
-      overlay.querySelectorAll('.cj-prension-att-side').forEach((a) => { a.style.display = a.dataset.side === CJ_PRENSION.side ? '' : 'none'; });
-      overlay.querySelector('[data-cjson="prension"]').value = JSON.stringify(CJ_PRENSION);
+    // ---- Prensión manual del perfil general: mismos controles y clases que adulto mayor ----
+    const cjPrensionRoot = $('panel-prension');
+    const cjPrensionHidden = cjPrensionRoot.querySelector('[data-cjson="prension"]');
+    const saveCjPrension = () => { cjPrensionHidden.value = JSON.stringify(CJ_PRENSION); };
+    function syncCjPrensionSide() {
+      cjPrensionRoot.querySelectorAll('[data-p-group] .p-side').forEach((x) => x.classList.toggle('active', x.dataset.side === CJ_PRENSION.side));
+      cjPrensionRoot.querySelectorAll('.p-attempt-side').forEach((a) => { a.style.display = a.dataset.side === CJ_PRENSION.side ? '' : 'none'; });
     }
-    overlay.querySelectorAll('[data-field="cj-prension-side"] .cj-prension-side').forEach((b) => {
-      b.addEventListener('click', () => { CJ_PRENSION.side = b.dataset.side; renderCjPrensionSide(); });
+    cjPrensionRoot.querySelectorAll('[data-p-group] .p-side').forEach((b) => {
+      b.addEventListener('click', () => { CJ_PRENSION.side = b.dataset.side; syncCjPrensionSide(); saveCjPrension(); });
     });
-    overlay.querySelectorAll('.cj-prension-att-v').forEach((inp) => {
-      inp.addEventListener('input', () => {
-        CJ_PRENSION[inp.dataset.side][Number(inp.dataset.i)].v = inp.value;
-        overlay.querySelector('[data-cjson="prension"]').value = JSON.stringify(CJ_PRENSION);
+    cjPrensionRoot.querySelectorAll('.p-num').forEach((el) => {
+      const [, side, idx, field] = el.dataset.pPath.split('.');
+      el.addEventListener('input', () => {
+        CJ_PRENSION[side][Number(idx)][field] = el.value;
+        saveCjPrension();
       });
     });
+    syncCjPrensionSide();
 
     // ---- Timer buttons (TUG, equilibrio, McGill, plancha) ----
     overlay.querySelectorAll('.timer-btn').forEach((b) => {
