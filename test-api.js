@@ -119,6 +119,11 @@ async function main() {
     && /crédito/i.test(clientBookingMail.text)
     && /no tienes que confirmar/i.test(clientBookingMail.text),
   'La confirmación al cliente incluye fecha, hora, crédito y aviso de que no requiere acción');
+  assert(!/reserva\s*#\d+/i.test(clientBookingMail.text)
+    && !(clientBookingMail.html && /reserva\s*#\d+/i.test(clientBookingMail.html)),
+  'La confirmación al cliente no muestra el número de reserva');
+  assert(bookingMails[0] && /reserva #\d+/.test(bookingMails[0].text),
+  'El aviso al entrenador sí incluye el número de reserva');
 
   const me2 = await req('GET', '/me', null, token);
   assert(me2.body.user.credits_balance === 4, `Se descontó 1 crédito (${me2.body.user.credits_balance})`);

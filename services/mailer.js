@@ -340,7 +340,6 @@ async function sendBookingConfirmationEmail(client, booking, link = clientLink()
   const when = `${booking.date || 'fecha desconocida'} a las ${booking.time || 'hora desconocida'}${booking.endTime ? ` - ${booking.endTime}` : ''}`;
   const theme = booking.theme || 'Sin temática';
   const kind = booking.kind === 'dirigida' ? 'Sesión dirigida' : 'Sesión normal';
-  const bookingRef = booking.bookingId ? ` (reserva #${booking.bookingId})` : '';
   const credits = Number(booking.creditsUsed) > 0
     ? ` Se ha descontado ${Number(booking.creditsUsed)} ${Number(booking.creditsUsed) === 1 ? 'crédito' : 'créditos'} de tu saldo.`
     : '';
@@ -348,7 +347,7 @@ async function sendBookingConfirmationEmail(client, booking, link = clientLink()
   const text = [
     `Hola ${name},`,
     '',
-    `Tu reserva en OSTEOMUR Training está confirmada${bookingRef}.`,
+    'Tu reserva en OSTEOMUR Training está confirmada.',
     'Tu plaza ya está reservada: no tienes que confirmar nada por correo.',
     '',
     `Sesión: ${when}`,
@@ -361,7 +360,7 @@ async function sendBookingConfirmationEmail(client, booking, link = clientLink()
 
   const html = layout('Reserva confirmada', `
     <p>Hola <b>${escapeHtml(name)}</b>,</p>
-    <p>Tu reserva en OSTEOMUR Training está confirmada${escapeHtml(bookingRef)}.</p>
+    <p>Tu reserva en OSTEOMUR Training está confirmada.</p>
     <p style="font-size:13px;color:#475569;">Tu plaza ya está reservada: <b>no tienes que confirmar nada por correo</b>.</p>
     <table style="width:100%;border-collapse:collapse;margin:18px 0;font-size:14px;">
       <tr><td style="padding:8px 0;color:#64748b;">Sesión</td><td style="padding:8px 0;font-weight:700;">${escapeHtml(when)}</td></tr>
