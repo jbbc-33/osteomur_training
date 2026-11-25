@@ -155,6 +155,7 @@ router.post('/slots', (req, res, next) => {
       exercises_json: cleanExercises.length ? JSON.stringify(cleanExercises) : null,
       kind: targeting.kind, targeted_to: targeting.targeted_to,
     });
+    if (!slot) throw new ApiError(409, 'Ya existe otra clase a esa hora en el mismo día');
     broadcast('session.updated', { slot_id: slot.id, reason: 'slot_created' });
     res.status(201).json({ slot });
   } catch (e) { next(e); }

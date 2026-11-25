@@ -431,6 +431,8 @@ async function main() {
   const newSlot = await req('POST', '/trainer/slots', { date: futureDate, start_time: '21:45', capacity: 4 }, tToken);
   assert(newSlot.status === 201 && newSlot.body.slot.status === 'open', 'Crear clase manual en el calendario');
   const slotId = newSlot.body.slot.id;
+  const dupSlot = await req('POST', '/trainer/slots', { date: futureDate, start_time: '21:45', capacity: 4 }, tToken);
+  assert(dupSlot.status === 409, `Clase duplicada da 409, nunca 500 (${dupSlot.status})`);
 
   const delSlot = await req('POST', '/trainer/slots', { date: futureDate, start_time: '22:45', capacity: 4 }, tToken);
   const delRes = await req('DELETE', `/trainer/slots/${delSlot.body.slot.id}`, null, tToken);

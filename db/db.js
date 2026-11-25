@@ -801,14 +801,24 @@ function createSlot(date, startTime, opts = {}) {
   const targeted = kind === 'dirigida' && Array.isArray(opts.targeted_to) && opts.targeted_to.length
     ? JSON.stringify(opts.targeted_to.map(Number))
     : null;
+  // La clave única es (date, start_time). Si ya hay clase, NO insertamos: un
+  // INSERT OR IGNORE deja lastInsertRowid apuntando a otra fila y podía devolver
+  // undefined (500 en POST /slots). Devolvemos null para que la ruta responda 409.
+  const exists = db.prepare('SELECT 1 FROM slots WHERE date = ? AND start_time = ?').get(date, startTime);
+  if (exists) return null;
+
   db.prepare('DELETE FROM deleted_slots WHERE date = ? AND start_time = ?').run(date, startTime);
   const r = db.prepare(
     'INSERT OR IGNORE INTO slots (date, start_time, end_time, capacity, credit_cost, theme, exercises_json, kind, targeted_to, origin) VALUES (?,?,?,?,?,?,?,?,?,?)'
   ).run(date, startTime, es, capacity, opts.credit_cost ?? 1, opts.theme || null, opts.exercises_json || null, kind, targeted, 'manual');
-  const id = Number(r.lastInsertRowid);
-  return id
-    ? db.prepare('SELECT * FROM slots WHERE id = ?').get(id)
-    : db.prepare('SELECT * FROM slots WHERE date = ? AND start_time = ?').get(date, startTime);
+  if (!Number(r.changes)) {
+    // Otra petición pudo crearla en paralelo entre la comprobación y el insert.
+    return null;
+  }
+  // Leer por clave natural, nunca por lastInsertRowid (obsoleto si se ignoró un insert).
+  const slot = db.prepare('SELECT * FROM slots WHERE date = ? AND start_time = ?').get(date, startTime);
+  if (!slot) throw new Error(`No se pudo leer la clase creada ${date} ${startTime}`);
+  return slot;
 }
 
 function nowIso() {
