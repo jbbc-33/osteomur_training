@@ -89,7 +89,9 @@ function securityHeaders(req, res, next) {
   res.setHeader('Content-Security-Policy', csp);
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('Referrer-Policy', 'no-referrer');
+  // YouTube exige que llegue el Referer del embed (error 153 si no). La política
+  // recomendada envía solo el origen, sin filtrar la ruta completa.
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
   res.setHeader('X-DNS-Prefetch-Control', 'off');
   res.setHeader('Origin-Agent-Cluster', '?1');

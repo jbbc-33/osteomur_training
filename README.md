@@ -28,7 +28,7 @@ Para usarla desde tu **móvil/tablet en la misma red**, entra desde el móvil a 
 | Rol | Email |
 |---|---|
 | Entrenador | `entrenador@osteomur.es` |
-| Cliente | `carlos@demo.com`, `marta@demo.com`, `luis@demo.com`, `ana@demo.com`, `pedro@demo.com`, `laura@demo.com` |
+| Cliente | `carlos@demo.com`, `marta@demo.com`, `luis@demo.com`, `ana@demo.com`, `pedro@demo.com`, `laura@demo.com`, `jpurebas333@gmail.com` (pruebas de correo) |
 
 Al loguearse, la app redirige automáticamente a la vista correspondiente según el rol.
 
@@ -40,7 +40,7 @@ Al loguearse, la app redirige automáticamente a la vista correspondiente según
 - **Recuperación**: en el login, “¿Has olvidado tu contraseña?” envía por Gmail un enlace de un solo uso (caduca en 1 hora) a `/reset-password.html`. La respuesta es siempre genérica para no revelar si el email existe.
 - Cada cambio envía un correo de confirmación a la cuenta.
 - **Avisos y alertas por email**: además del centro de notificaciones de la app, los clientes reciben por Gmail los recordatorios de clase, avisos de créditos/bonos y alertas. El cliente puede desactivar estos correos en **Mi perfil → Notificaciones**.
-- **Reserva confirmada**: al reservar, el cliente recibe un correo con fecha, hora, tipo, temática y crédito descontado, y los entrenadores activos reciben el aviso «Nueva reserva de …» con los datos del cliente. Ambos son correos transaccionales y no dependen de la preferencia de avisos.
+- **Reserva confirmada (informativo)**: al reservar, el cliente recibe un correo con fecha, hora, tipo, temática y crédito descontado; **no tiene que confirmar nada ni pulsar ningún enlace**, la plaza ya está reservada. Los entrenadores activos reciben el aviso «Nueva reserva de …» con los datos del cliente. Ambos correos son transaccionales y no dependen de la preferencia de avisos.
 - Los correos de **recuperación de cuenta y seguridad** (enlace de contraseña y confirmación de cambio) son obligatorios y **no se pueden desactivar**.
 
 El sistema admite dos proveedores, elegidos con `MAIL_PROVIDER`:
@@ -67,7 +67,7 @@ Si en producción ves `[mailer] No se pudo enviar el correo ... Brevo 401`, la c
 ### Comprobar el correo en producción
 
 - `GET /api/health` devuelve `mail`: proveedor, remitente detectado y si el envío está activo, sin claves ni secretos.
-- `POST /api/trainer/mail/test` (con el token del entrenador) envía un correo de prueba **al propio entrenador** y devuelve `{ delivered, error, to, config }`. Si se envía `{"to":"cliente@ejemplo.com"}`, prueba ese destinatario, siempre que esté registrado en la app. Es la forma más rápida de distinguir un fallo de Brevo de un problema de preferencias del cliente.
+- `POST /api/trainer/mail/test` (con el token del entrenador) envía un correo de prueba **al propio entrenador** y devuelve `{ delivered, error, to, config }`. Para probar un cliente, envía `{"to":"jpurebas333@gmail.com"}` (o cualquier otro email registrado en la app). **El correo de pruebas de la app es siempre `jpurebas333@gmail.com`**. Es la forma más rápida de distinguir un fallo de Brevo de un problema de preferencias del cliente.
 - Los envíos correctos se registran como `[mailer] Enviado a ... · asunto · id=...`. Si un aviso se omite porque el cliente desactivó los correos, aparece `[notifications] Correo omitido para ...: avisos por email desactivados`.
 - Los avisos a clientes (recordatorios, créditos, bonos) solo se envían si el cliente tiene `email_notifications` activo; los avisos de nueva reserva solo a entrenadores activos con esa misma preferencia. La **confirmación de reserva al cliente** se envía siempre. Si el destinatario usa un correo temporal, Brevo puede aceptar la petición pero el proveedor del buzón temporal puede filtrarla: comprueba siempre primero con tu correo real.
 

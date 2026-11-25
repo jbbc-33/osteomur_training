@@ -599,6 +599,7 @@ function embedVideo(url) {
       src="${esc(src)}"
       title="Vídeo explicativo del ejercicio"
       frameborder="0"
+      referrerpolicy="strict-origin-when-cross-origin"
       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
       allowfullscreen
       playsinline

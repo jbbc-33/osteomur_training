@@ -29,9 +29,13 @@ function parseTargeting(body, current = {}) {
   if (typeof curTargeted === 'string') {
     try { curTargeted = curTargeted ? JSON.parse(curTargeted) : []; } catch { curTargeted = []; }
   }
-  const raw = body.targeted_to !== undefined ? body.targeted_to : (Array.isArray(curTargeted) ? curTargeted : []);
+  const raw = body.targeted_to !== undefined ? body.targeted_to : curTargeted;
+  // Acepta IDs como número, string u objeto {user_id}/{id}, igual que el
+  // selector del cliente. Así un dato inesperado no llega a la BD ni provoca
+  // un error 500 al bindear parámetros.
   const ids = Array.from(new Set(
-    (Array.isArray(raw) ? raw : []).map(Number).filter((n) => Number.isInteger(n) && n > 0)
+    (Array.isArray(raw) ? raw : []).map((x) => Number(x && typeof x === 'object' ? (x.user_id ?? x.id) : x))
+      .filter((n) => Number.isInteger(n) && n > 0)
   ));
   if (!ids.length) throw new ApiError(400, 'Las sesiones dirigidas requieren al menos un cliente seleccionado');
   const ph = ids.map(() => '?').join(',');
@@ -133,8 +137,24 @@ router.post('/slots', (req, res, next) => {
     if (d.getTime() < new Date(new Date().toDateString()).getTime()) {
       throw new ApiError(400, 'No se pueden crear clases en días pasados');
     }
+    // Validar antes de tocar la BD: un valor inesperado debe ser 400 con
+    // mensaje claro, nunca un 500 genérico al bindear parámetros SQLite.
+    const duration = duration_minutes !== undefined && duration_minutes !== ''
+      ? int(duration_minutes, { min: 15, max: 240, field: 'La duración' }) : 60;
+    const cap = capacity !== undefined && capacity !== ''
+      ? int(capacity, { min: 1, max: 100, field: 'El aforo' }) : 4;
+    const cost = credit_cost !== undefined && credit_cost !== ''
+      ? int(credit_cost, { min: 1, max: 1000, field: 'El coste en créditos' }) : 1;
+    const cleanTheme = optionalText(theme, { max: 160, field: 'La temática' });
+    const cleanExercises = Array.isArray(exercises)
+      ? exercises.map((x) => text(x, { max: 160, field: 'Cada ejercicio' })).filter(Boolean)
+      : [];
     const targeting = parseTargeting(req.body || {}, {});
-    const slot = createSlot(date, start_time, { duration_minutes, capacity, credit_cost, theme, exercises_json: exercises ? JSON.stringify(exercises) : null, kind: targeting.kind, targeted_to: targeting.targeted_to });
+    const slot = createSlot(date, start_time, {
+      duration_minutes: duration, capacity: cap, credit_cost: cost, theme: cleanTheme,
+      exercises_json: cleanExercises.length ? JSON.stringify(cleanExercises) : null,
+      kind: targeting.kind, targeted_to: targeting.targeted_to,
+    });
     broadcast('session.updated', { slot_id: slot.id, reason: 'slot_created' });
     res.status(201).json({ slot });
   } catch (e) { next(e); }
@@ -157,16 +177,20 @@ router.put('/slots/:id', (req, res, next) => {
       const clash = db.prepare('SELECT id FROM slots WHERE date = ? AND start_time = ? AND id != ?').get(slot.date, newStart, id);
       if (clash) throw new ApiError(409, 'Ya existe otra clase a esa hora en el mismo día');
     }
-    const duration = Number(duration_minutes) || 60;
+    const duration = duration_minutes !== undefined && duration_minutes !== ''
+      ? int(duration_minutes, { min: 15, max: 240, field: 'La duración' }) : 60;
     const [h, m] = newStart.split(':').map(Number);
     const end = addMinutes(new Date(2026, 0, 5, h, m), duration);
     const end_time = `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
-    const capacityV = capacity !== undefined && capacity !== '' ? Number(capacity) : slot.capacity;
-    const costV = credit_cost !== undefined && credit_cost !== '' ? Number(credit_cost) : slot.credit_cost;
+    const capacityV = capacity !== undefined && capacity !== ''
+      ? int(capacity, { min: 1, max: 100, field: 'El aforo' }) : slot.capacity;
+    const costV = credit_cost !== undefined && credit_cost !== ''
+      ? int(credit_cost, { min: 1, max: 1000, field: 'El coste en créditos' }) : slot.credit_cost;
     const themeV = theme !== undefined
-      ? (theme == null || String(theme).trim() === '' ? null : String(theme).trim())
-      : slot.theme;
-    const exV = exercises !== undefined ? (exercises ? JSON.stringify(exercises) : null) : slot.exercises_json;
+      ? optionalText(theme, { max: 160, field: 'La temática' }) : slot.theme;
+    const exList = Array.isArray(exercises)
+      ? exercises.map((x) => text(x, { max: 160, field: 'Cada ejercicio' })).filter(Boolean) : [];
+    const exV = exercises === undefined ? slot.exercises_json : (exList.length ? JSON.stringify(exList) : null);
     const targetedJson = targeting.targeted_to ? JSON.stringify(targeting.targeted_to) : null;
 
     const activeBookings = Number(db.prepare("SELECT COUNT(*) AS c FROM bookings WHERE slot_id = ? AND status = 'booked'").get(id).c);
@@ -257,7 +281,10 @@ function parseTemplateBody(body) {
   if (kind === 'dirigida') {
     let raw = body.targeted_to;
     if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch { raw = []; } }
-    targetedIds = Array.from(new Set((Array.isArray(raw) ? raw : []).map(Number).filter((n) => Number.isInteger(n) && n > 0)));
+    targetedIds = Array.from(new Set(
+      (Array.isArray(raw) ? raw : []).map((x) => Number(x && typeof x === 'object' ? (x.user_id ?? x.id) : x))
+        .filter((n) => Number.isInteger(n) && n > 0)
+    ));
     if (!targetedIds.length) throw new ApiError(400, 'Las sesiones dirigidas requieren al menos un cliente seleccionado');
     const ph = targetedIds.map(() => '?').join(',');
     const found = db.prepare(`SELECT id FROM users WHERE role = 'client' AND id IN (${ph})`).all(...targetedIds);

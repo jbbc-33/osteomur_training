@@ -4,6 +4,7 @@
 process.env.MAIL_OUTBOX_ONLY = '1';
 
 const http = require('http');
+const fs = require('fs');
 const app = require('./server');
 const { db: testDb } = require('./db/db');
 const mailer = require('./services/mailer');
@@ -31,7 +32,7 @@ function req(method, path, body, token) {
       res.on('end', () => {
         let json = null;
         try { json = JSON.parse(raw); } catch {}
-        resolve({ status: res.statusCode, body: json, raw });
+        resolve({ status: res.statusCode, body: json, raw, headers: res.headers });
       });
     });
     r.on('error', reject);
@@ -51,6 +52,8 @@ async function main() {
   const me = await req('GET', '/me', null, token);
   assert(me.status === 200 && me.body.user.credits_balance === 5, `Perfil con créditos (${me.body.user.credits_balance})`);
   assert(me.body.wallets.length === 1 && me.body.wallets[0].source === 'bono' && me.body.wallets[0].credits_remaining === 5, 'Perfil expone la cartera del bono (5 créditos)');
+  assert(me.headers['referrer-policy'] === 'strict-origin-when-cross-origin',
+    'La política de referrer permite el Referer que exigen los vídeos de YouTube');
 
   const badLogin = await req('POST', '/auth/login', { email: 'carlos@demo.com', password: 'mala' });
   assert(badLogin.status === 401, 'Login con contraseña incorrecta rechazado');
@@ -113,8 +116,9 @@ async function main() {
   const clientBookingMail = clientBookingMails()[0];
   assert(clientBookingMail && clientBookingMail.text.includes(futureDay.date)
     && clientBookingMail.text.includes(String(freeSlot.start_time).slice(0, 5))
-    && /crédito/i.test(clientBookingMail.text),
-  'La confirmación al cliente incluye fecha, hora y crédito descontado');
+    && /crédito/i.test(clientBookingMail.text)
+    && /no tienes que confirmar/i.test(clientBookingMail.text),
+  'La confirmación al cliente incluye fecha, hora, crédito y aviso de que no requiere acción');
 
   const me2 = await req('GET', '/me', null, token);
   assert(me2.body.user.credits_balance === 4, `Se descontó 1 crédito (${me2.body.user.credits_balance})`);
@@ -380,6 +384,27 @@ async function main() {
   const dirDay2 = await req('GET', '/trainer/day?date=' + dirDate, null, tToken);
   const dirEdited = dirDay2.body.slots.find((s) => s.start_time === dirTime);
   assert(dirEdited && dirEdited.theme === null, 'Editar sin temática no guarda el texto "null"');
+
+  // Regresiones: la temática "null" nunca se guarda como texto y los IDs
+  // dirigidos pueden llegar como objetos {user_id} o strings sin dar 500.
+  const dirTime2 = '22:30';
+  const dirSlot2 = await req('POST', '/trainer/slots', {
+    date: dirDate, start_time: dirTime2, duration_minutes: '60', capacity: '4',
+    credit_cost: '1', theme: 'null', kind: 'dirigida',
+    targeted_to: [{ user_id: carlos.id }],
+  }, tToken);
+  assert(dirSlot2.status === 201, `Sesión dirigida con IDs normalizados (${dirSlot2.status})`);
+  const dirDay3 = await req('GET', '/trainer/day?date=' + dirDate, null, tToken);
+  const dirFound2 = dirDay3.body.slots.find((s) => s.start_time === dirTime2);
+  assert(dirFound2 && dirFound2.theme === null && dirFound2.targeted
+    && dirFound2.targeted.some((t) => t.user_id === carlos.id),
+  'Temática "null" se guarda como NULL y el destinatario objeto se conserva');
+  const badSlot = await req('POST', '/trainer/slots', {
+    date: dirDate, start_time: '23:15', capacity: {}, kind: 'dirigida',
+    targeted_to: [carlos.id],
+  }, tToken);
+  assert(badSlot.status === 400, `Datos inválidos dan 400, no 500 (${badSlot.status})`);
+
   const outsiderBook = await req('POST', '/bookings', { slot_id: dirFound.slot_id }, pedroToken);
   assert(outsiderBook.status === 403, `Cliente no invitado no puede reservar (${outsiderBook.status})`);
   const invitedBook = await req('POST', '/bookings', { slot_id: dirFound.slot_id }, token);
@@ -863,6 +888,9 @@ async function main() {
   assert(testClientMail.status === 200 && testClientMail.body.to === 'carlos@demo.com'
     && mailer.getOutbox().some((m) => m.to === 'carlos@demo.com' && /Correo de prueba/.test(m.subject)),
   'La prueba de correo admite un cliente registrado como destinatario');
+  const testMailCanonical = await req('POST', '/trainer/mail/test', { to: 'jpurebas333@gmail.com' }, tToken);
+  assert(testMailCanonical.status === 200 && testMailCanonical.body.to === 'jpurebas333@gmail.com',
+    'El correo de pruebas canónico es jpurebas333@gmail.com');
   const testBadMail = await req('POST', '/trainer/mail/test', { to: 'no-registrado@demo.com' }, tToken);
   assert(testBadMail.status === 400, 'La prueba de correo rechaza emails que no están en la app');
   mailer.clearOutbox();
@@ -884,6 +912,9 @@ async function main() {
     const r = await sreq(p);
     assert(r.status === 200, `Servido ${label} (${r.status})`);
   }
+  const clientJs = fs.readFileSync(require('path').join(__dirname, 'public/js/app-client.js'), 'utf8');
+  assert(clientJs.includes('referrerpolicy="strict-origin-when-cross-origin"'),
+    'El reproductor de vídeo identifica el embed para YouTube (error 153)');
 
   console.log(`\n====================================`);
   console.log(`  RESULTADOS: ${passed} OK · ${failed} ERROR`);

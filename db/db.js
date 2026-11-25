@@ -617,6 +617,15 @@ try {
   if (!columnExists('class_templates', 'targeted_to')) {
     db.exec(`ALTER TABLE class_templates ADD COLUMN targeted_to TEXT;`);
   }
+
+  // Limpieza de datos antiguos: algunas versiones guardaron el literal "null"
+  // como texto en campos opcionales. Debe ser NULL de verdad para que la UI no
+  // muestre "null" como temática de la sesión.
+  for (const table of ['slots', 'class_templates']) {
+    db.exec(`UPDATE ${table} SET theme = NULL WHERE lower(trim(theme)) IN ('null', 'undefined', 'none', '')`);
+    db.exec(`UPDATE ${table} SET exercises_json = NULL WHERE lower(trim(exercises_json)) IN ('null', 'undefined', '')`);
+    db.exec(`UPDATE ${table} SET targeted_to = NULL WHERE lower(trim(targeted_to)) IN ('null', 'undefined', '')`);
+  }
 } catch (e) {
   console.warn('Migración de esquema no aplicada:', e.message);
 }

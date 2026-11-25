@@ -39,7 +39,9 @@ function text(value, { max = 255, field = 'campo' } = {}) {
 function optionalText(value, opts = {}) {
   if (value === undefined || value === null) return null;
   const s = text(value, opts);
-  return s === '' ? null : s;
+  // Datos antiguos guardaron el literal "null"/"undefined" en vez de NULL.
+  // Nunca debe persistirse como texto visible (p. ej. la temática de una clase).
+  return s === '' || /^(null|undefined)$/i.test(s) ? null : s;
 }
 
 function normalizeEmail(value) {

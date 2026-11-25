@@ -349,6 +349,7 @@ async function sendBookingConfirmationEmail(client, booking, link = clientLink()
     `Hola ${name},`,
     '',
     `Tu reserva en OSTEOMUR Training está confirmada${bookingRef}.`,
+    'Tu plaza ya está reservada: no tienes que confirmar nada por correo.',
     '',
     `Sesión: ${when}`,
     `Tipo: ${kind}`,
@@ -361,6 +362,7 @@ async function sendBookingConfirmationEmail(client, booking, link = clientLink()
   const html = layout('Reserva confirmada', `
     <p>Hola <b>${escapeHtml(name)}</b>,</p>
     <p>Tu reserva en OSTEOMUR Training está confirmada${escapeHtml(bookingRef)}.</p>
+    <p style="font-size:13px;color:#475569;">Tu plaza ya está reservada: <b>no tienes que confirmar nada por correo</b>.</p>
     <table style="width:100%;border-collapse:collapse;margin:18px 0;font-size:14px;">
       <tr><td style="padding:8px 0;color:#64748b;">Sesión</td><td style="padding:8px 0;font-weight:700;">${escapeHtml(when)}</td></tr>
       <tr><td style="padding:8px 0;color:#64748b;">Tipo</td><td style="padding:8px 0;">${escapeHtml(kind)}</td></tr>

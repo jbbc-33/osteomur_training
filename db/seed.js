@@ -110,6 +110,13 @@ const clients = [
     notes: 'Aumentar carga progresiva en tren inferior.',
     credits: 4,
   },
+  {
+    // Destinatario canónico para las pruebas de correo (Nunca usar otra cuenta).
+    email: 'jpurebas333@gmail.com', name: 'Cliente de pruebas', age: 30, height: 175, sport: 'Pruebas',
+    injuries: '',
+    notes: 'Cuenta de demostración para verificar los correos de la app.',
+    credits: 0,
+  },
 ];
 
 const today = new Date();
@@ -137,8 +144,9 @@ clients.forEach((c, i) => {
 
   const start = new Date(today);
   start.setMonth(start.getMonth() - 4);
-  const baseW = [86, 63, 92, 58, 95, 55][i];
-  const baseF = [19.5, 26.0, 21.0, 24.5, 22.0, 18.5][i];
+  // Un valor por cliente (el último es el destinatario de pruebas de correo).
+  const baseW = [86, 63, 92, 58, 95, 55, 78][i];
+  const baseF = [19.5, 26.0, 21.0, 24.5, 22.0, 18.5, 20.0][i];
   for (let m = 0; m < 4; m++) {
     const on = new Date(start.getFullYear(), start.getMonth() + m, 12);
     const k = m / 4;
@@ -485,4 +493,4 @@ console.log('  Valoraciones:  ', count('body_compositions'));
 console.log('');
 console.log('Cuentas de demo (contraseña: demo1234)');
 console.log('  Entrenador: entrenador@osteomur.es');
-console.log('  Clientes:   carlos@demo.com, marta@demo.com, luis@demo.com, ana@demo.com, pedro@demo.com, laura@demo.com');
+console.log('  Clientes:   carlos@demo.com, marta@demo.com, luis@demo.com, ana@demo.com, pedro@demo.com, laura@demo.com, jpurebas333@gmail.com (pruebas de correo)');
