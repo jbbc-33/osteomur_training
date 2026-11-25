@@ -3302,7 +3302,12 @@ function openAssessmentEditor(clientId, kind) {
     const CJ_PL_D = cj.plancha_d || { elapsed: 0, running: false };
     const CJ_PL_I = cj.plancha_i || { elapsed: 0, running: false };
     const CJ_CMJ = cj.cmj || { attempts: [{ cm: '', valid: true }, { cm: '', valid: true }, { cm: '', valid: true }] };
-    const CJ_CMJ_U = normalizeCmju(cj.cmj_unilateral);
+    // La batería general usa la misma prueba de presión manual que el perfil
+    // adulto mayor, con el modelo { side, d:[{v}], i:[{v}] }.
+    const CJ_PRENSION = deepMerge(
+      { side: 'd', d: [{ v: '' }, { v: '' }, { v: '' }], i: [{ v: '' }, { v: '' }, { v: '' }] },
+      cj.prension || {}
+    );
     const CJ_EBB = (() => {
       const d = cj.ebbeling ? deepMerge(EBB_DEFAULTS(), cj.ebbeling) : EBB_DEFAULTS();
       if ((d.age_years == null || d.age_years === '') && A.user?.age != null) d.age_years = Number(A.user.age);
@@ -3481,21 +3486,20 @@ function openAssessmentEditor(clientId, kind) {
             </div>`).join('')}
         </div>
 
-        <h5 class="test-title">CMJ unilateral</h5>
-        <input type="hidden" data-cjson="cmj_unilateral" value='${JSON.stringify(CJ_CMJ_U)}'>
-        <div class="btn-group" data-field="cmju-side" style="margin-bottom:8px;">
-          <button type="button" class="btn btn-sm btn-ghost cmju-side${CJ_CMJ_U.side === 'd' ? ' active' : ''}" data-side="d">Derecha</button>
-          <button type="button" class="btn btn-sm btn-ghost cmju-side${CJ_CMJ_U.side === 'i' ? ' active' : ''}" data-side="i">Izquierda</button>
+        <h5 class="test-title">Fuerza de prensión manual</h5>
+        <input type="hidden" data-cjson="prension" value='${JSON.stringify(CJ_PRENSION)}'>
+        <div class="btn-group" data-field="cj-prension-side" style="margin-bottom:8px;">
+          <button type="button" class="btn btn-sm btn-ghost cj-prension-side${CJ_PRENSION.side === 'd' ? ' active' : ''}" data-side="d">Derecha</button>
+          <button type="button" class="btn btn-sm btn-ghost cj-prension-side${CJ_PRENSION.side === 'i' ? ' active' : ''}" data-side="i">Izquierda</button>
         </div>
         ${['d', 'i'].map((s) => `
-        <div class="cmju-att-side" data-side="${s}" style="${CJ_CMJ_U.side === s ? '' : 'display:none;'}">
-          <div class="small muted" style="font-weight:700;margin-bottom:4px;">${s === 'd' ? 'Derecha' : 'Izquierda'}.</div>
+        <div class="cj-prension-att-side" data-side="${s}" style="${CJ_PRENSION.side === s ? '' : 'display:none;'}">
+          <div class="small muted" style="font-weight:700;margin-bottom:4px;">${s === 'd' ? 'Derecha' : 'Izquierda'} · kgf</div>
           <div class="form-grid-3">
-            ${CJ_CMJ_U[s].map((a, i) => `
+            ${CJ_PRENSION[s].map((a, i) => `
               <div class="assess-card">
                 <div class="small muted" style="font-weight:700;">Intento ${i + 1}</div>
-                <input class="cmju-att-cm" data-i="${i}" type="number" step="any" value="${a.cm}" placeholder="cm" style="margin:6px 0;width:100%;">
-                <button type="button" class="btn btn-sm btn-ghost cmju-att-valid${a.valido ? ' active-ok' : ''}" data-i="${i}">${a.valido ? 'Válido' : 'No válido'}</button>
+                <input class="cj-prension-att-v" data-side="${s}" data-i="${i}" type="number" step="any" value="${a.v}" placeholder="kgf" style="margin:6px 0;width:100%;">
               </div>`).join('')}
           </div>
         </div>`).join('')}
@@ -3720,30 +3724,19 @@ function openAssessmentEditor(clientId, kind) {
       });
     });
 
-    // ---- CMJ unilateral ----
-    function renderCmjuSide() {
-      overlay.querySelectorAll('[data-field="cmju-side"] .cmju-side').forEach((x) => x.classList.toggle('active', x.dataset.side === CJ_CMJ_U.side));
-      overlay.querySelectorAll('.cmju-att-side').forEach((a) => { a.style.display = a.dataset.side === CJ_CMJ_U.side ? '' : 'none'; });
-      overlay.querySelector('[data-cjson="cmj_unilateral"]').value = JSON.stringify(CJ_CMJ_U);
+    // ---- Prensión manual (batería general, mismo modelo que adulto mayor) ----
+    function renderCjPrensionSide() {
+      overlay.querySelectorAll('[data-field="cj-prension-side"] .cj-prension-side').forEach((x) => x.classList.toggle('active', x.dataset.side === CJ_PRENSION.side));
+      overlay.querySelectorAll('.cj-prension-att-side').forEach((a) => { a.style.display = a.dataset.side === CJ_PRENSION.side ? '' : 'none'; });
+      overlay.querySelector('[data-cjson="prension"]').value = JSON.stringify(CJ_PRENSION);
     }
-    overlay.querySelectorAll('[data-field="cmju-side"] .cmju-side').forEach((b) => {
-      b.addEventListener('click', () => { CJ_CMJ_U.side = b.dataset.side; renderCmjuSide(); });
+    overlay.querySelectorAll('[data-field="cj-prension-side"] .cj-prension-side').forEach((b) => {
+      b.addEventListener('click', () => { CJ_PRENSION.side = b.dataset.side; renderCjPrensionSide(); });
     });
-    overlay.querySelectorAll('.cmju-att-cm').forEach((inp) => {
+    overlay.querySelectorAll('.cj-prension-att-v').forEach((inp) => {
       inp.addEventListener('input', () => {
-        const side = inp.closest('.cmju-att-side').dataset.side;
-        CJ_CMJ_U[side][Number(inp.dataset.i)].cm = inp.value;
-        overlay.querySelector('[data-cjson="cmj_unilateral"]').value = JSON.stringify(CJ_CMJ_U);
-      });
-    });
-    overlay.querySelectorAll('.cmju-att-valid').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const side = btn.closest('.cmju-att-side').dataset.side;
-        const a = CJ_CMJ_U[side][Number(btn.dataset.i)];
-        a.valido = !a.valido;
-        btn.textContent = a.valido ? 'Válido' : 'No válido';
-        btn.classList.toggle('active-ok', a.valido);
-        overlay.querySelector('[data-cjson="cmj_unilateral"]').value = JSON.stringify(CJ_CMJ_U);
+        CJ_PRENSION[inp.dataset.side][Number(inp.dataset.i)].v = inp.value;
+        overlay.querySelector('[data-cjson="prension"]').value = JSON.stringify(CJ_PRENSION);
       });
     });
 

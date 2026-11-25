@@ -6,7 +6,7 @@
   "plancha_d": { "elapsed": 44.0 },
   "plancha_i": { "elapsed": 41.5 },
   "cmj": { "attempts": [{ "cm": 32.4, "valid": true }, { "cm": 31.8, "valid": true }] },
-  "cmj_unilateral": { "side": "d", "d": { "attempts": [{ "cm": 21.0, "valid": true }] }, "i": { "attempts": [{ "cm": 19.5, "valid": true }] } },
+  "prension": { "side": "d", "d": [{ "v": 26 }, { "v": 27 }], "i": [{ "v": 23 }, { "v": 24 }] },
   "ebbeling": { "speed_mph": 3.4, "speed_kmh": 5.5, "stage_hr_min3": 148, "steady_state_hr": 146, "vo2max_estimated": 27.8, "warmup_hr_end": 120, "rpe_end": 13, "operator": "Local", "hr_device": "Polar H10", "placement": "antebrazo", "notes": "sin incidencias" },
   "adulto_mayor": {
     "tug": { "elapsed": 14.2 },

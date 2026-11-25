@@ -113,8 +113,8 @@ const PROFILE_LABELS = {
 // las pruebas de TODOS los perfiles, así que aquí se declara de qué perfil es
 // cada clave y se descartan las de los demás antes de construir el informe.
 const PERFIL_JSON_KEYS = {
-  general: ['equilibrio', 'sentadilla', 'mcgill_flexores', 'mcgill_extensores', 'plancha_d', 'plancha_i', 'cmj', 'cmj_unilateral', 'ebbeling'],
-  salud: ['equilibrio', 'sentadilla', 'mcgill_flexores', 'mcgill_extensores', 'plancha_d', 'plancha_i', 'cmj', 'cmj_unilateral', 'ebbeling'],
+  general: ['equilibrio', 'sentadilla', 'mcgill_flexores', 'mcgill_extensores', 'plancha_d', 'plancha_i', 'cmj', 'prension', 'ebbeling'],
+  salud: ['equilibrio', 'sentadilla', 'mcgill_flexores', 'mcgill_extensores', 'plancha_d', 'plancha_i', 'cmj', 'prension', 'ebbeling'],
   rendimiento: ['rendimiento'],
   adulto_mayor: ['adulto_mayor'],
   readaptacion: ['readaptacion'],
@@ -363,23 +363,24 @@ function generateAssessmentReport(assessmentId) {
       .map((a) => `${a.cm} cm (${a.valid ? 'válido' : 'no válido'})`).join(' · ');
     if (list) complexRows.push(`<h3 style="font-size:15px; color:#063DA8; margin-top:20px;">CMJ</h3><p style="font-size:13px;">${list}</p>`);
   }
-  const cmjuJson = testsJson.cmj_unilateral;
-  if (cmjuJson) {
-    const attemptList = (arr) => Array.isArray(arr)
-      ? arr.filter((a) => a && a.cm !== '' && a.cm != null)
-        .map((a) => `${a.cm} cm (${(a.valid !== false && a.valido !== false) ? 'válido' : 'no válido'})`).join(' · ')
+  // Mismo modelo que el perfil adulto mayor: { side, d:[{v}], i:[{v}] }.
+  const gripJson = testsJson.prension;
+  if (gripJson) {
+    const gripTxt = (list) => Array.isArray(list)
+      ? list.filter((a) => a && a.v !== '' && a.v != null).map((a) => `${a.v} kgf`).join(' · ')
       : '';
-    const legList = cmjuJson.d && cmjuJson.d.attempts ? cmjuJson.d.attempts : cmjuJson.d;
-    const rigList = cmjuJson.i && cmjuJson.i.attempts ? cmjuJson.i.attempts : cmjuJson.i;
-    const dd = attemptList(legList);
-    const di = attemptList(rigList);
-    if (dd) complexRows.push(`<h3 style="font-size:15px; color:#063DA8; margin-top:20px;">CMJ unilateral · Derecha</h3><p style="font-size:13px;">${dd}</p>`);
-    if (di) complexRows.push(`<h3 style="font-size:15px; color:#063DA8; margin-top:20px;">CMJ unilateral · Izquierda</h3><p style="font-size:13px;">${di}</p>`);
-    if (!dd && !di && Array.isArray(cmjuJson.attempts)) {
-      const list = cmjuJson.attempts
-        .filter((a) => a.cm !== '' && a.cm != null)
-        .map((a) => `${a.cm} cm (${a.valid ? 'válido' : 'no válido'})`).join(' · ');
-      if (list) complexRows.push(`<h3 style="font-size:15px; color:#063DA8; margin-top:20px;">CMJ unilateral</h3><p style="font-size:13px;">${list}</p>`);
+    const dGrip = gripTxt(gripJson.d);
+    const iGrip = gripTxt(gripJson.i);
+    if (dGrip || iGrip) {
+      const rowsGrip = [
+        dGrip ? ['Fuerza de prensión D (kgf)', dGrip] : null,
+        iGrip ? ['Fuerza de prensión I (kgf)', iGrip] : null,
+      ].filter(Boolean);
+      complexRows.push(`<h3 style="font-size:15px; color:#063DA8; margin-top:20px;">Fuerza de prensión manual</h3>
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
+          <tbody>${rowsGrip.map(([l, v]) => `<tr><td style="padding:6px 8px;border:1px solid #e2e8f0;">${l}</td><td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:right;font-weight:700;">${esc(v)}</td></tr>`).join('')}
+          </tbody>
+        </table>`);
     }
   }
 

@@ -30,7 +30,7 @@ const PERFILES = ['general', 'rendimiento', 'adulto_mayor', 'readaptacion'];
 
 // Qué claves de tests_json / assessment_tests pertenecen a cada perfil.
 const JSON_KEYS = {
-  general: ['equilibrio', 'sentadilla', 'mcgill_flexores', 'mcgill_extensores', 'plancha_d', 'plancha_i', 'cmj', 'cmj_unilateral', 'ebbeling'],
+  general: ['equilibrio', 'sentadilla', 'mcgill_flexores', 'mcgill_extensores', 'plancha_d', 'plancha_i', 'cmj', 'prension', 'ebbeling'],
   rendimiento: ['rendimiento'],
   adulto_mayor: ['adulto_mayor'],
   readaptacion: ['readaptacion'],
@@ -45,9 +45,11 @@ const TEST_KEYS = {
 const COMUNES = ['rest_hr', 'systolic_mmhg', 'diastolic_mmhg', 'weight_kg'];
 // Títulos que solo puede producir la batería de un perfil concreto.
 const MARCAS = {
-  general: ['Equilibrio monopodal', 'Sentadilla observacional', 'McGill flexores', 'Plancha lateral derecha', 'CMJ unilateral \u00b7 Derecha', 'Ebbeling \u2014 test cardiorrespiratorio', 'WBLT tobillo derecho', 'Chester Step Test', 'VO\u2082m\u00e1x'],
+  // "Fuerza de prensión D/I (kgf)" es compartida con adulto mayor: para distinguir
+  // la batería general usamos su título y un valor único del fixture (26 kgf).
+  general: ['Equilibrio monopodal', 'Sentadilla observacional', 'McGill flexores', 'Plancha lateral derecha', 'Fuerza de prensión manual', '26 kgf', 'Ebbeling \u2014 test cardiorrespiratorio', 'WBLT tobillo derecho', 'Chester Step Test', 'VO\u2082m\u00e1x'],
   rendimiento: ['Perfil de rendimiento', 'GXT \u00b7 etapa 1', 'YBT anterior D', 'Longitud de pierna', 'Drop Jump', 'Sprint \u00b7 distancia', 'COD D \u00b7 tiempo'],
-  adulto_mayor: ['Perfil Adulto Mayor', 'Bruce Modificado \u00b7 etapa 1', 'Timed Up & Go', 'Dinamometr\u00eda mano derecha', 'Fuerza de prensi\u00f3n D (kgf)', 'Heel-rise \u00b7 conteo'],
+  adulto_mayor: ['Perfil Adulto Mayor', 'Bruce Modificado \u00b7 etapa 1', 'Timed Up & Go', 'Dinamometr\u00eda mano derecha', 'Heel-rise \u00b7 conteo'],
   readaptacion: ['CKCUEST \u00b7 tiempo', 'Prueba funcional \u00b7 protocolo'],
 };
 
