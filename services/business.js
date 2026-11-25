@@ -3,6 +3,7 @@
 const { db, slotStartDateTime } = require('../db/db');
 const { broadcast, broadcastToUser } = require('./events');
 const { notifyAdminsNewBooking } = require('./notifications');
+const mailer = require('./mailer');
 
 const CANCEL_WINDOW_HOURS = Number(process.env.CANCEL_WINDOW_HOURS || 24);
 const CANCEL_WINDOW_MS = CANCEL_WINDOW_HOURS * 3600 * 1000;
@@ -265,7 +266,20 @@ function createBooking(slotId, userId) {
     db.exec('COMMIT');
     broadcast('session.updated', { slot_id: Number(slotId), reason: 'booking' });
     broadcastToUser(userId, 'credits.updated', { user_id: userId, reason: 'booking' });
-    // El correo es best-effort: la reserva ya está confirmada y no debe fallar por él.
+    // Los correos son best-effort: la reserva ya está confirmada y no debe
+    // fallar por ellos. El cliente recibe su confirmación y el equipo el aviso.
+    const booking = {
+      bookingId,
+      date: slot.date,
+      time: slot.start_time,
+      endTime: slot.end_time,
+      theme: slot.theme,
+      kind: slot.kind,
+      creditsUsed: cost,
+    };
+    Promise.resolve(mailer.sendBookingConfirmationEmail(user, booking)).catch((e) => {
+      console.warn('[mailer] No se pudo confirmar la reserva al cliente:', e.message);
+    });
     notifyAdminsNewBooking({ client: user, slot, bookingId });
     return bookingId;
   } catch (e) {

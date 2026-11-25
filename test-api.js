@@ -106,12 +106,23 @@ async function main() {
     && bookingMails[0].text.includes(String(freeSlot.start_time).slice(0, 5)),
   'El email de reserva incluye cliente, fecha y hora de la sesión');
 
+  const clientBookingMails = () => mailer.getOutbox().filter(
+    (m) => m.to === 'carlos@demo.com' && /Reserva confirmada/i.test(m.subject)
+  );
+  assert(clientBookingMails().length === 1, 'La reserva envía confirmación al cliente');
+  const clientBookingMail = clientBookingMails()[0];
+  assert(clientBookingMail && clientBookingMail.text.includes(futureDay.date)
+    && clientBookingMail.text.includes(String(freeSlot.start_time).slice(0, 5))
+    && /crédito/i.test(clientBookingMail.text),
+  'La confirmación al cliente incluye fecha, hora y crédito descontado');
+
   const me2 = await req('GET', '/me', null, token);
   assert(me2.body.user.credits_balance === 4, `Se descontó 1 crédito (${me2.body.user.credits_balance})`);
 
   const dup = await req('POST', '/bookings', { slot_id: freeSlot.id }, token);
   assert(dup.status === 400, 'Doble reserva en la misma franja rechazada');
   assert(adminBookingMails().length === 1, 'Una reserva rechazada no genera otro aviso');
+  assert(clientBookingMails().length === 1, 'Una reserva rechazada no genera otra confirmación');
 
   // cancelar con devolución
   const myBookings = await req('GET', '/my-bookings', null, token);

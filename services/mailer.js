@@ -328,6 +328,54 @@ async function sendAdminBookingEmail(admin, booking, link = null) {
   });
 }
 
+function clientLink() {
+  const base = process.env.PUBLIC_BASE_URL || process.env.APP_BASE_URL;
+  return base ? `${String(base).replace(/\/+$/, '')}/client.html` : null;
+}
+
+// Confirmación inmediata al cliente que acaba de reservar. Es un correo
+// transaccional (como el de seguridad): no depende de email_notifications.
+async function sendBookingConfirmationEmail(client, booking, link = clientLink()) {
+  const name = client.full_name || 'cliente';
+  const when = `${booking.date || 'fecha desconocida'} a las ${booking.time || 'hora desconocida'}${booking.endTime ? ` - ${booking.endTime}` : ''}`;
+  const theme = booking.theme || 'Sin temática';
+  const kind = booking.kind === 'dirigida' ? 'Sesión dirigida' : 'Sesión normal';
+  const bookingRef = booking.bookingId ? ` (reserva #${booking.bookingId})` : '';
+  const credits = Number(booking.creditsUsed) > 0
+    ? ` Se ha descontado ${Number(booking.creditsUsed)} ${Number(booking.creditsUsed) === 1 ? 'crédito' : 'créditos'} de tu saldo.`
+    : '';
+
+  const text = [
+    `Hola ${name},`,
+    '',
+    `Tu reserva en OSTEOMUR Training está confirmada${bookingRef}.`,
+    '',
+    `Sesión: ${when}`,
+    `Tipo: ${kind}`,
+    `Temática: ${theme}${credits}`,
+    '',
+    ...(link ? ['Puedes verla en la app:', link, ''] : []),
+    'Si no puedes asistir, cancela la reserva desde la app con al menos 2 horas de antelación para recuperar el crédito.',
+  ].join('\n');
+
+  const html = layout('Reserva confirmada', `
+    <p>Hola <b>${escapeHtml(name)}</b>,</p>
+    <p>Tu reserva en OSTEOMUR Training está confirmada${escapeHtml(bookingRef)}.</p>
+    <table style="width:100%;border-collapse:collapse;margin:18px 0;font-size:14px;">
+      <tr><td style="padding:8px 0;color:#64748b;">Sesión</td><td style="padding:8px 0;font-weight:700;">${escapeHtml(when)}</td></tr>
+      <tr><td style="padding:8px 0;color:#64748b;">Tipo</td><td style="padding:8px 0;">${escapeHtml(kind)}</td></tr>
+      <tr><td style="padding:8px 0;color:#64748b;">Temática</td><td style="padding:8px 0;">${escapeHtml(theme)}</td></tr>
+    </table>
+    <p style="font-size:13px;color:#475569;">${escapeHtml(credits.trim())}</p>
+    ${link ? `<p style="margin:22px 0;">
+      <a href="${escapeHtml(link)}" style="display:inline-block;background:#063DA8;color:#fff;text-decoration:none;font-weight:700;padding:12px 20px;border-radius:10px;">Ver mis reservas</a>
+    </p>` : ''}
+    <p style="font-size:12px;color:#64748b;">Si no puedes asistir, cancela desde la app con al menos 2 horas de antelación para recuperar el crédito.</p>
+  `);
+
+  return sendMail({ to: client.email, subject: `Reserva confirmada: ${when} · OSTEOMUR Training`, text, html });
+}
+
 function getOutbox() {
   return outbox.slice();
 }
@@ -343,6 +391,7 @@ module.exports = {
   sendPasswordChangedEmail,
   sendNotificationEmail,
   sendAdminBookingEmail,
+  sendBookingConfirmationEmail,
   getOutbox,
   clearOutbox,
   describeConfig,
